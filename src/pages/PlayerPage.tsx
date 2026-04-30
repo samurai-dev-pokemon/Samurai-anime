@@ -2,28 +2,14 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
 import type { Anime, AnimeEpisode } from '../types/anime';
 import { getAnimeEpisodes, getAnimeRecommendationsById } from '../api/jikan';
+import { getEmbedUrls } from '../api/embedSources';
 import AnimeCard from '../components/AnimeCard';
 
-function getEmbedUrl(malId: number, episode: number, source: string): string {
-  switch (source) {
-    case 'embed1':
-      return `https://vidsrc.me/embed/anime?mal=${malId}&episode=${episode}`;
-    case 'embed2':
-      return `https://vidsrc.to/embed/anime/${malId}/${episode}`;
-    case 'embed3':
-      return `https://vidsrc.dev/embed/anime/${malId}/${episode}`;
-    case 'embed4':
-      return `https://www.2embed.skin/embedanime/${malId}/${episode}`;
-    default:
-      return `https://vidsrc.me/embed/anime?mal=${malId}&episode=${episode}`;
-  }
-}
-
 const SOURCES = [
-  { id: 'embed1', label: 'VidSrc', icon: '▶' },
-  { id: 'embed2', label: 'VidSrc 2', icon: '◆' },
-  { id: 'embed3', label: 'VidSrc 3', icon: '◉' },
-  { id: 'embed4', label: '2Embed', icon: '⬡' },
+  { id: 'vidsrc', label: 'VidSrc' },
+  { id: 'vidsrc2', label: 'VidSrc Pro' },
+  { id: 'embed2', label: '2Embed' },
+  { id: 'embedsu', label: 'EmbedSu' },
 ];
 
 interface PlayerPageProps {
@@ -35,7 +21,7 @@ interface PlayerPageProps {
 export default function PlayerPage({ anime, onBack, onAnimeSelect }: PlayerPageProps) {
   const [episodes, setEpisodes] = useState<AnimeEpisode[]>([]);
   const [currentEp, setCurrentEp] = useState(1);
-  const [source, setSource] = useState('embed1');
+  const [source, setSource] = useState('vidsrc');
   const [loadingEps, setLoadingEps] = useState(true);
   const [recommendations, setRecommendations] = useState<Anime[]>([]);
   const [iframeKey, setIframeKey] = useState(0);
@@ -45,10 +31,13 @@ export default function PlayerPage({ anime, onBack, onAnimeSelect }: PlayerPageP
   const [loadingMoreEps, setLoadingMoreEps] = useState(false);
   const [iframeStatus, setIframeStatus] = useState<'loading' | 'loaded' | 'error'>('loading');
   const iframeRef = useRef<HTMLIFrameElement>(null);
+  const [embedUrls, setEmbedUrls] = useState<any>(null);
+  const [loadingEmbed, setLoadingEmbed] = useState(true);
+  const [embedError, setEmbedError] = useState<string | null>(null);
 
   const title = anime.title_english || anime.title;
   const image = anime.images?.jpg?.large_image_url || anime.images?.jpg?.image_url;
-  const embedUrl = getEmbedUrl(anime.mal_id, currentEp, source);
+  const embedUrl = embedUrls ? embedUrls[source] : null;
 
   const totalEps = anime.episodes && anime.episodes > 0
     ? anime.episodes
@@ -59,6 +48,24 @@ export default function PlayerPage({ anime, onBack, onAnimeSelect }: PlayerPageP
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'smooth' });
   }, []);
+
+  // Load embed URLs when episode changes
+  useEffect(() => {
+    setLoadingEmbed(true);
+    setEmbedError(null);
+    setEmbedUrls(null);
+
+    getEmbedUrls(anime.mal_id, currentEp)
+      .then(urls => {
+        setEmbedUrls(urls);
+        setLoadingEmbed(false);
+      })
+      .catch(err => {
+        console.error(err);
+        setEmbedError('This anime is not available on these sources');
+        setLoadingEmbed(false);
+      });
+  }, [anime.mal_id, currentEp]);
 
   useEffect(() => {
     setLoadingEps(true);
@@ -139,7 +146,11 @@ export default function PlayerPage({ anime, onBack, onAnimeSelect }: PlayerPageP
         <div className="h-4 w-px bg-white/10" />
         <div className="flex items-center gap-3 min-w-0">
           {image && (
-            <img src={image} alt={title} className="w-8 h-10 object-cover rounded-md shrink-0" />
+            <img
+              src={image}
+              alt={title}
+              className="w-8 h-10 object-cover rounded-md shrink-0"
+            />
           )}
           <div className="min-w-0">
             <p className="text-white font-semibold text-sm truncate">{title}</p>
@@ -149,56 +160,71 @@ export default function PlayerPage({ anime, onBack, onAnimeSelect }: PlayerPageP
       </div>
 
       <div className="pt-16 flex flex-col xl:flex-row gap-0 max-w-[1800px] mx-auto">
+        {/* Main Player Area */}
         <div className="flex-1 min-w-0">
 
-          {/* Player */}
+          {/* Player with loading/error states */}
           <div className="relative bg-black" style={{ aspectRatio: '16/9' }}>
-            {iframeStatus === 'loading' && (
+
+            {/* Loading overlay */}
+            {(iframeStatus === 'loading' || loadingEmbed) && (
               <div className="absolute inset-0 flex flex-col items-center justify-center bg-zinc-950 z-10 gap-3">
                 <div className="w-10 h-10 border-2 border-red-500 border-t-transparent rounded-full animate-spin" />
-                <p className="text-white/40 text-sm">Loading player...</p>
+                <p className="text-white/40 text-sm">
+                  {loadingEmbed ? 'Finding video sources...' : 'Loading player...'}
+                </p>
               </div>
             )}
 
-            {iframeStatus === 'error' && (
+            {/* Error state */}
+            {(iframeStatus === 'error' || embedError) && !loadingEmbed && (
               <div className="absolute inset-0 flex flex-col items-center justify-center bg-zinc-950 z-10 gap-4">
                 <div className="text-5xl">⚠️</div>
-                <p className="text-white font-semibold">This source didn't load</p>
-                <p className="text-white/40 text-sm text-center max-w-xs">
-                  Try a different source below.
+                <p className="text-white font-semibold">
+                  {embedError || 'This source didn\'t load'}
                 </p>
-                <div className="flex gap-2 flex-wrap justify-center">
-                  {SOURCES.filter(s => s.id !== source).map(s => (
-                    <button
-                      key={s.id}
-                      onClick={() => handleSourceChange(s.id)}
-                      className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg text-sm font-medium transition-colors"
-                    >
-                      Try {s.label}
-                    </button>
-                  ))}
-                </div>
+                <p className="text-white/40 text-sm text-center max-w-xs">
+                  {embedError 
+                    ? 'This anime may not be on TMDB or these embed sites'
+                    : 'The embed was blocked or unavailable. Try a different source below.'}
+                </p>
+                {!embedError && (
+                  <div className="flex gap-2 flex-wrap justify-center">
+                    {SOURCES.filter(s => s.id !== source).map(s => (
+                      <button
+                        key={s.id}
+                        onClick={() => handleSourceChange(s.id)}
+                        className="px-4 py-2 bg-red-600 hover:bg-red-500 text-white rounded-lg text-sm font-medium transition-colors"
+                      >
+                        Try {s.label}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             )}
 
-            <iframe
-              key={iframeKey}
-              ref={iframeRef}
-              src={embedUrl}
-              className="w-full h-full"
-              style={{ border: 'none', display: 'block' }}
-              allowFullScreen
-              allow="fullscreen; autoplay; encrypted-media; picture-in-picture"
-              referrerPolicy="no-referrer"
-              title={`${title} - Episode ${currentEp}`}
-              onLoad={() => setIframeStatus('loaded')}
-              onError={() => setIframeStatus('error')}
-            />
+            {embedUrl && !loadingEmbed && (
+              <iframe
+                key={iframeKey}
+                ref={iframeRef}
+                src={embedUrl}
+                className="w-full h-full"
+                style={{ border: 'none', display: 'block' }}
+                allowFullScreen
+                allow="fullscreen; autoplay; encrypted-media; picture-in-picture"
+                referrerPolicy="no-referrer"
+                title={`${title} - Episode ${currentEp}`}
+                onLoad={() => setIframeStatus('loaded')}
+                onError={() => setIframeStatus('error')}
+              />
+            )}
           </div>
 
-          {/* Controls */}
+          {/* Controls Bar */}
           <div className="bg-zinc-950 border-b border-white/5 px-4 py-3">
             <div className="flex flex-col sm:flex-row gap-3 items-start sm:items-center justify-between">
+              {/* Episode Nav */}
               <div className="flex items-center gap-2">
                 <button
                   onClick={() => currentEp > 1 && handleEpClick(currentEp - 1)}
@@ -225,6 +251,7 @@ export default function PlayerPage({ anime, onBack, onAnimeSelect }: PlayerPageP
                 </button>
               </div>
 
+              {/* Source Selector */}
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="text-white/30 text-xs font-medium uppercase tracking-wider mr-1">
                   Source:
@@ -244,8 +271,9 @@ export default function PlayerPage({ anime, onBack, onAnimeSelect }: PlayerPageP
                 ))}
               </div>
             </div>
+
             <p className="text-white/20 text-xs mt-2">
-              💡 If player shows blank, try another source
+              💡 Not all anime are on TMDB. If nothing loads, this anime might not be available.
             </p>
           </div>
 
@@ -253,7 +281,11 @@ export default function PlayerPage({ anime, onBack, onAnimeSelect }: PlayerPageP
           <div className="bg-zinc-950 px-4 py-5 border-b border-white/5">
             <div className="flex gap-4">
               {image && (
-                <img src={image} alt={title} className="w-20 h-28 object-cover rounded-xl shrink-0 shadow-lg" />
+                <img
+                  src={image}
+                  alt={title}
+                  className="w-20 h-28 object-cover rounded-xl shrink-0 shadow-lg"
+                />
               )}
               <div className="min-w-0">
                 <h1 className="text-white font-black text-xl leading-tight mb-2">{title}</h1>
@@ -274,19 +306,24 @@ export default function PlayerPage({ anime, onBack, onAnimeSelect }: PlayerPageP
                     </span>
                   )}
                   {anime.genres?.slice(0, 3).map(g => (
-                    <span key={g.mal_id} className="text-xs text-white/50 bg-white/8 border border-white/10 px-2 py-0.5 rounded-full">
+                    <span
+                      key={g.mal_id}
+                      className="text-xs text-white/50 bg-white/8 border border-white/10 px-2 py-0.5 rounded-full"
+                    >
                       {g.name}
                     </span>
                   ))}
                 </div>
                 {anime.synopsis && (
-                  <p className="text-white/50 text-sm leading-relaxed line-clamp-3">{anime.synopsis}</p>
+                  <p className="text-white/50 text-sm leading-relaxed line-clamp-3">
+                    {anime.synopsis}
+                  </p>
                 )}
               </div>
             </div>
           </div>
 
-          {/* Recommendations desktop */}
+          {/* Recommendations (desktop) */}
           {recommendations.length > 0 && (
             <div className="hidden xl:block bg-zinc-950 px-4 py-5">
               <h3 className="text-white font-bold mb-4 text-sm uppercase tracking-wider opacity-60">
@@ -301,7 +338,7 @@ export default function PlayerPage({ anime, onBack, onAnimeSelect }: PlayerPageP
           )}
         </div>
 
-        {/* Episodes Sidebar */}
+        {/* Sidebar — Episodes */}
         <div className="xl:w-80 shrink-0 bg-zinc-950 border-l border-white/5 flex flex-col">
           <div className="px-4 py-3 border-b border-white/5 flex items-center justify-between sticky top-16 bg-zinc-950 z-10">
             <div>
@@ -324,8 +361,7 @@ export default function PlayerPage({ anime, onBack, onAnimeSelect }: PlayerPageP
             </button>
           </div>
 
-          <div
-            className={`flex-1 overflow-y-auto xl:max-h-[calc(100vh-4rem)] ${!showEpisodes ? 'hidden xl:block' : ''}`}
+          <div className={`flex-1 overflow-y-auto xl:max-h-[calc(100vh-4rem)] ${!showEpisodes ? 'hidden xl:block' : ''}`}
             style={{ scrollbarWidth: 'thin', scrollbarColor: '#ef4444 transparent' }}
           >
             {loadingEps ? (
@@ -370,9 +406,11 @@ export default function PlayerPage({ anime, onBack, onAnimeSelect }: PlayerPageP
                       )}
                     </div>
                     <div className="min-w-0">
-                      <p className={`text-sm font-medium truncate transition-colors ${
-                        currentEp === ep.number ? 'text-white' : 'text-white/60 group-hover:text-white'
-                      }`}>
+                      <p
+                        className={`text-sm font-medium truncate transition-colors ${
+                          currentEp === ep.number ? 'text-white' : 'text-white/60 group-hover:text-white'
+                        }`}
+                      >
                         {ep.title || `Episode ${ep.number}`}
                       </p>
                       <p className="text-white/25 text-xs">Episode {ep.number}</p>
@@ -404,7 +442,7 @@ export default function PlayerPage({ anime, onBack, onAnimeSelect }: PlayerPageP
         </div>
       </div>
 
-      {/* Recommendations mobile */}
+      {/* Recommendations (mobile) */}
       {recommendations.length > 0 && (
         <div className="xl:hidden bg-zinc-950 px-4 py-6 mt-1">
           <h3 className="text-white font-bold mb-4 text-sm uppercase tracking-wider opacity-60">
