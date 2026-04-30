@@ -8,11 +8,10 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 export default defineConfig({
-  base: "Samurai-anime", // 
+  base: "/", // 👈 Changed this - Vercel needs just /
   plugins: [
     react(),
     tailwindcss(),
-    // removed viteSingleFile unless you specifically need it
   ],
   resolve: {
     alias: {
