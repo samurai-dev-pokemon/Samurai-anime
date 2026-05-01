@@ -1,5 +1,5 @@
 // src/api/embedSources.ts
-
+const TMDB_API_KEY= bdcc7ff578b42ef4350bba3d06d8933f
 // Get TMDB ID from MAL ID using MalSync
 async function getTmdbId(malId: number, title: string): Promise<number | null> {
   try {
@@ -12,7 +12,7 @@ async function getTmdbId(malId: number, title: string): Promise<number | null> {
     
     // Fallback: search TMDB by title
     const searchRes = await fetch(
-      `https://api.themoviedb.org/3/search/tv?api_key=YOUR_KEY&query=${encodeURIComponent(title)}`
+      `https://api.themoviedb.org/3/search/tv?api_key=bdcc7ff578b42ef4350bba3d06d8933f&query=${encodeURIComponent(title)}`
     );
     const searchData = await searchRes.json();
     return searchData.results?.[0]?.id ?? null;
