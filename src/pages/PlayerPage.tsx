@@ -45,27 +45,23 @@ export default function PlayerPage({ anime, onBack, onAnimeSelect }: PlayerPageP
       ? Math.max(...episodes.map(e => e.mal_id))
       : 1;
 
-  useEffect(() => {
-    window.scrollTo({ top: 0, behavior: 'smooth' });
-  }, []);
+// Load embed URLs when episode changes
+useEffect(() => {
+  setLoadingEmbed(true);
+  setEmbedError(null);
+  setEmbedUrls(null);
 
-  // Load embed URLs when episode changes
-  useEffect(() => {
-    setLoadingEmbed(true);
-    setEmbedError(null);
-    setEmbedUrls(null);
-
-    getEmbedUrls(anime.mal_id, currentEp)
-      .then(urls => {
-        setEmbedUrls(urls);
-        setLoadingEmbed(false);
-      })
-      .catch(err => {
-        console.error(err);
-        setEmbedError('This anime is not available on these sources');
-        setLoadingEmbed(false);
-      });
-  }, [anime.mal_id, currentEp]);
+  getEmbedUrls(anime.mal_id, title, currentEp) // 👈 Added title here
+    .then(urls => {
+      setEmbedUrls(urls);
+      setLoadingEmbed(false);
+    })
+    .catch(err => {
+      console.error(err);
+      setEmbedError('This anime is not available on these sources');
+      setLoadingEmbed(false);
+    });
+}, [anime.mal_id, currentEp, title]); // 👈 Added title to dependencies
 
   useEffect(() => {
     setLoadingEps(true);
