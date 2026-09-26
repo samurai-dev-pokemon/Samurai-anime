@@ -1,8 +1,5 @@
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="public/images/logo-mark-white.png">
-  <source media="(prefers-color-scheme: light)" srcset="public/images/logo-mark-dark.png">
-  <img alt="Samurai-anime-logo" src="public/images/logo-mark.png" width="120" />
-</picture>
+<div align="center">
+  <img src="public/images/logo-mark.png" alt="Samurai-anime-logo" width="120" />
 
   ### Stream Anime. From anywhere.
 
