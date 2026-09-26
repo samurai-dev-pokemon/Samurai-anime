@@ -1,6 +1,6 @@
 <div align="center">
   <img src="public/images/logo-mark.png" alt="Samurai-anime-logo" width="120" />
-  # Samurai Anime
+
 
   ### Stream Anime. From anywhere.
 
