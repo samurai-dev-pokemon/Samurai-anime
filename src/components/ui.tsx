@@ -47,6 +47,7 @@ export const Icon = {
   ThumbsDown: svg(<path d="M10 15v4a3 3 0 0 0 3 3l4-9V2H5.72a2 2 0 0 0-2 1.7l-1.38 9a2 2 0 0 0 2 2.3zM17 2h3a2 2 0 0 1 2 2v7a2 2 0 0 1-2 2h-3" />),
   Rewind10: svg(<><path d="M3 12a9 9 0 1 0 3-6.7" /><polyline points="3 4 3 9 8 9" /></>),
   Forward10: svg(<><path d="M21 12a9 9 0 1 1-3-6.7" /><polyline points="21 4 21 9 16 9" /></>),
+  SkipForward: svg(<><polygon points="5 4 15 12 5 20 5 4" fill="currentColor" stroke="none" /><line x1="19" y1="5" x2="19" y2="19" /></>),
   Globe: svg(<><circle cx="12" cy="12" r="10" /><line x1="2" y1="12" x2="22" y2="12" /><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z" /></>),
   Trash: svg(<><polyline points="3 6 5 6 21 6" /><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" /><path d="M10 11v6M14 11v6M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" /></>),
   Send: svg(<><line x1="22" y1="2" x2="11" y2="13" /><polygon points="22 2 15 22 11 13 2 9 22 2" /></>),
@@ -111,9 +112,6 @@ export function CardRow({ children }: { children: ReactNode }) {
     el.scrollBy({ left: dir * el.clientWidth * 0.85, behavior: "smooth" });
   }
 
-  // Real pixel fade at the scrollable edges via CSS mask, instead of a
-  // flat color overlay — avoids the hard-line artifact against busy
-  // poster art. Only fades the side that actually has more to scroll.
   const fade = 56;
   const maskImage = `linear-gradient(to right, ${canLeft ? "transparent, black " + fade + "px" : "black 0px"}, black calc(100% - ${canRight ? fade : 0}px), ${canRight ? "transparent" : "black"})`;
 

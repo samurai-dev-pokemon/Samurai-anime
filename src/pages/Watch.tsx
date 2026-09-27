@@ -3,7 +3,7 @@ import { Link, useParams, useSearchParams } from "react-router-dom";
 import Comments from "../components/Comments";
 import { cn } from "../utils/cn";
 import { href } from "../utils/router";
-import { findBestStream, getAnimeByMalId, getEpisodeCount, resolveWatch, titleOf } from "../lib/api";
+import { findBestStream, getAnimeByMalId, getEpisodeCount, getSkipTimes, resolveWatch, titleOf } from "../lib/api";
 import {
   markEpisodeWatched,
   removeFromWatchlist,
@@ -57,6 +57,13 @@ export default function Watch() {
     return findBestStream({ malId: id, ep, type: audio });
   }, [id, ep, audio]);
 
+  // Aniskip fallback — used whenever the scraper's own stream response
+  // doesn't already include intro/outro timestamps for this episode.
+  const { data: skipTimes } = useAsync(async () => {
+    if (!id || !ep) return null;
+    return getSkipTimes(id, ep);
+  }, [id, ep]);
+
   async function useServer(name: string) {
     setServer(name);
     const result = await resolveWatch({ malId: id, ep, type: audio, server: name, strict: true });
@@ -73,7 +80,18 @@ export default function Watch() {
   // off, don't silently hand them Sub audio when they explicitly asked for
   // Dub — block playback and show a clear message instead.
   const blockedPartialDub = audio === "dub" && !dubFallbackEnabled && !!activeStream?.partial;
-  const playableStream = blockedPartialDub ? null : activeStream;
+  const rawPlayableStream = blockedPartialDub ? null : activeStream;
+
+  // Merge in Aniskip intro/outro times whenever the scraper didn't already
+  // provide them on the stream object itself. Scraper-provided values (if
+  // any) always win — Aniskip is purely a fallback.
+  const playableStream = rawPlayableStream
+    ? {
+        ...rawPlayableStream,
+        intro: rawPlayableStream.intro ?? skipTimes?.intro ?? null,
+        outro: rawPlayableStream.outro ?? skipTimes?.outro ?? null,
+      }
+    : rawPlayableStream;
 
   const progress = useProgress();
   const progressLoaded = useProgressLoaded();

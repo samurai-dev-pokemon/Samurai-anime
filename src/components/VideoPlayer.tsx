@@ -158,10 +158,6 @@ export default function VideoPlayer({
     };
   }, [onProgress, onEnded]);
 
-  // Applies both the on/off toggle and the "which track is default" logic
-  // in one place. <track default> alone isn't reliably honored once tracks
-  // are added dynamically via React, so textTrack.mode is set explicitly
-  // every time subtitles are (re)loaded or the toggle changes.
   useEffect(() => {
     const video = videoRef.current;
     if (!video) return;
@@ -200,6 +196,12 @@ export default function VideoPlayer({
     skipFlashTimer.current = window.setTimeout(() => setSkipFlash(null), 550);
   }
 
+  function jumpTo(t: number) {
+    const video = videoRef.current;
+    if (!video) return;
+    video.currentTime = t;
+  }
+
   function flashSubSize(scale: number) {
     setSubFlash(`Subtitles ${Math.round(scale * 100)}%`);
     if (subFlashTimer.current) window.clearTimeout(subFlashTimer.current);
@@ -221,10 +223,6 @@ export default function VideoPlayer({
     else video.pause();
   }
 
-  // Keyboard shortcuts: Space play/pause, Left/Right seek 10s, +/- resize
-  // subtitles. All ignored while typing in a form field, or while focus is
-  // on one of our own <button> controls (so Space doesn't both activate
-  // the focused button *and* re-toggle play via this global handler).
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
       const el = document.activeElement as HTMLElement | null;
@@ -312,6 +310,13 @@ export default function VideoPlayer({
 
   const pct = duration ? (time / duration) * 100 : 0;
 
+  // Aniskip / scraper-provided intro & outro windows — button only shows
+  // while currentTime actually falls inside the interval.
+  const introActive = !!stream?.intro && time >= stream.intro.start && time < stream.intro.end;
+  const outroActive = !!stream?.outro && time >= stream.outro.start && time < stream.outro.end;
+  const skipTarget = introActive ? stream?.intro?.end : outroActive ? stream?.outro?.end : null;
+  const skipLabel = introActive ? "Skip Intro" : outroActive ? "Skip Outro" : null;
+
   return (
     <div
       ref={wrapRef}
@@ -319,10 +324,6 @@ export default function VideoPlayer({
       onMouseMove={resetHideTimer}
       onMouseLeave={() => playing && setShowControls(false)}
     >
-      {/* Scoped ::cue styling so subtitle size can be controlled per this
-          player instance without affecting other <video> elements on the
-          page — font-size is one of the few properties WebVTT allows
-          inside ::cue per spec. */}
       <style>{`#${videoId}::cue { font-size: ${subtitleScale}em; }`}</style>
 
       <video id={videoId} ref={videoRef} className="h-full w-full" onClick={togglePlay} playsInline crossOrigin="anonymous">
@@ -342,16 +343,17 @@ export default function VideoPlayer({
       )}
 
       {!playing && ready && !buffering && (
-  <button
-    onClick={togglePlay}
-    className="absolute inset-0 grid place-items-center bg-black/10 transition hover:bg-black/20"
-    aria-label="Play"
-  >
-    <span className="grid h-16 w-16 place-items-center rounded-full border border-white/20 bg-black/45 text-white shadow-lg backdrop-blur-md transition duration-200 hover:scale-105 hover:border-red-500/50 hover:bg-black/60">
-      <Icon.Play className="ml-1 h-6 w-6" />
-    </span>
-  </button>
-)}
+        <button
+          onClick={togglePlay}
+          className="absolute inset-0 grid place-items-center bg-black/10 transition hover:bg-black/20"
+          aria-label="Play"
+        >
+          <span className="grid h-16 w-16 place-items-center rounded-full border border-white/20 bg-black/45 text-white shadow-lg backdrop-blur-md transition duration-200 hover:scale-105 hover:border-red-500/50 hover:bg-black/60">
+            <Icon.Play className="ml-1 h-6 w-6" />
+          </span>
+        </button>
+      )}
+
       {skipFlash && (
         <div className="pointer-events-none absolute inset-0 grid place-items-center">
           <div className="flex items-center gap-2 rounded-full bg-black/75 px-5 py-3 text-white backdrop-blur">
@@ -365,6 +367,19 @@ export default function VideoPlayer({
         <div className="pointer-events-none absolute inset-x-0 top-6 flex justify-center">
           <div className="rounded-full bg-black/75 px-4 py-1.5 text-xs font-semibold text-white backdrop-blur">{subFlash}</div>
         </div>
+      )}
+
+      {/* Intro/Outro skip button — persistently visible while active,
+          regardless of whether the rest of the control bar is faded out,
+          matching the behavior of most streaming sites (Crunchyroll, etc). */}
+      {skipLabel && skipTarget != null && (
+        <button
+          onClick={() => jumpTo(skipTarget)}
+          className="absolute bottom-20 right-4 z-20 flex items-center gap-2 rounded-lg border border-white/10 bg-black/80 px-4 py-2.5 text-sm font-semibold text-white shadow-lg backdrop-blur transition hover:scale-[1.03] hover:bg-black/95 sm:bottom-24 sm:right-6"
+        >
+          {skipLabel}
+          <Icon.SkipForward className="h-4 w-4" />
+        </button>
       )}
 
       <div className={cn("absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/95 via-black/50 to-transparent px-3 pb-2 pt-10 transition-opacity duration-300 sm:px-5", showControls ? "opacity-100" : "pointer-events-none opacity-0")}>
@@ -406,12 +421,6 @@ export default function VideoPlayer({
             <button onClick={toggleMute} aria-label="Mute">
               {muted || volume === 0 ? <Icon.Mute className="h-4.5 w-4.5" /> : <Icon.Volume className="h-4.5 w-4.5" />}
             </button>
-            {/* Wrapper is the only thing that animates width. The <input>
-                itself always keeps a real, fixed w-16 box — so the browser
-                never has to render a thumb against a collapsing track,
-                which was the actual cause of the stray dot next to the
-                speaker icon. overflow-hidden on the wrapper simply reveals
-                or hides the fixed-size slider underneath. */}
             <div className={cn("overflow-hidden transition-all duration-200", volumeHover ? "w-16" : "w-0")}>
               <input
                 type="range"

@@ -390,3 +390,63 @@ export async function getEpisodeCount(malId: number, knownEpisodes?: number | nu
     return cached?.count ?? knownEpisodes ?? null;
   }
 }
+/* ---------------- aniskip (intro/outro skip times) ---------------- */
+
+const ANISKIP_BASE = "https://api.aniskip.com";
+
+interface AniskipInterval {
+  startTime: number;
+  endTime: number;
+}
+
+interface AniskipResult {
+  interval: AniskipInterval;
+  skipType: "op" | "ed" | "mixed-op" | "mixed-ed" | "recap";
+  skipId: string;
+  episodeLength: number;
+}
+
+interface AniskipResponse {
+  statusCode: number;
+  message: string;
+  found: boolean;
+  results: AniskipResult[];
+}
+
+export interface SkipSegments {
+  intro: { start: number; end: number } | null;
+  outro: { start: number; end: number } | null;
+}
+
+/**
+ * Pulls opening/ending skip times from Aniskip using the anime's MAL id.
+ * Used as a fallback/enhancement when the scraper's own `intro`/`outro`
+ * fields on WatchResult are missing for a given episode.
+ */
+export async function getSkipTimes(malId: number, episodeNumber: number): Promise<SkipSegments> {
+  const empty: SkipSegments = { intro: null, outro: null };
+  if (!malId || !episodeNumber) return empty;
+
+  try {
+    const params = new URLSearchParams();
+    params.append("types", "op");
+    params.append("types", "ed");
+    params.append("episodeLength", "0"); // 0 = don't filter by length
+
+    const res = await fetch(`${ANISKIP_BASE}/v2/skip-times/${malId}/${episodeNumber}?${params.toString()}`);
+    if (!res.ok) return empty;
+
+    const data: AniskipResponse = await res.json();
+    if (!data.found) return empty;
+
+    const op = data.results.find((r) => r.skipType === "op");
+    const ed = data.results.find((r) => r.skipType === "ed");
+
+    return {
+      intro: op ? { start: op.interval.startTime, end: op.interval.endTime } : null,
+      outro: ed ? { start: ed.interval.startTime, end: ed.interval.endTime } : null,
+    };
+  } catch {
+    return empty;
+  }
+}
