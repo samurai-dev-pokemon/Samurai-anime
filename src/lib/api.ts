@@ -450,3 +450,65 @@ export async function getSkipTimes(malId: number, episodeNumber: number): Promis
     return empty;
   }
 }
+/* ---------------- episode thumbnails (kitsu/tmdb) ---------------- */
+
+const episodeThumbCache = new Map<string, string | null>();
+const episodeThumbInflight = new Map<string, Promise<string | null>>();
+
+async function fetchEpisodeThumbFrom(
+  provider: "kitsu" | "tmdb",
+  malId: number,
+  ep: number,
+): Promise<string | null> {
+  try {
+    const raw = await getJSON<any>(`${API_BASE}/${provider}/episode-thumb?ep=${ep}&malId=${malId}`);
+    return raw?.data?.thumbnail || null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolves a single episode's cover thumbnail. Tries Kitsu first (usually
+ * has better per-episode coverage), falls back to TMDB if Kitsu has
+ * nothing for that episode. Result is cached forever per (malId, ep) pair
+ * since these don't change.
+ */
+export async function getEpisodeThumb(malId: number, ep: number): Promise<string | null> {
+  const key = `${malId}-${ep}`;
+  if (episodeThumbCache.has(key)) return episodeThumbCache.get(key)!;
+  if (episodeThumbInflight.has(key)) return episodeThumbInflight.get(key)!;
+
+  const p = (async () => {
+    let thumb = await fetchEpisodeThumbFrom("kitsu", malId, ep);
+    if (!thumb) thumb = await fetchEpisodeThumbFrom("tmdb", malId, ep);
+    episodeThumbCache.set(key, thumb);
+    episodeThumbInflight.delete(key);
+    return thumb;
+  })();
+  episodeThumbInflight.set(key, p);
+  return p;
+}
+
+/**
+ * Fetches thumbnails for a batch of episode numbers with bounded
+ * concurrency, so loading a 24-episode page doesn't fire 24 simultaneous
+ * requests at once.
+ */
+export async function getEpisodeThumbsBatch(
+  malId: number,
+  episodeNumbers: number[],
+  concurrency = 6,
+): Promise<Record<number, string | null>> {
+  const result: Record<number, string | null> = {};
+  let cursor = 0;
+  async function worker() {
+    while (cursor < episodeNumbers.length) {
+      const idx = cursor++;
+      const ep = episodeNumbers[idx];
+      result[ep] = await getEpisodeThumb(malId, ep);
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(concurrency, episodeNumbers.length) }, worker));
+  return result;
+}

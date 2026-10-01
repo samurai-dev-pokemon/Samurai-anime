@@ -39,7 +39,15 @@ function Hero({ items }: { items: Anime[] }) {
   if (!a) return null;
 
   return (
-    <div className="relative h-[78vh] min-h-[520px] w-full overflow-hidden" onMouseEnter={() => setPaused(true)} onMouseLeave={() => setPaused(false)}>
+    <div
+      // Was h-[78vh] min-h-[520px] unconditionally — on a typical phone
+      // that ate almost the entire visible screen on load before any
+      // other content appeared. Now scales up progressively with screen
+      // size instead of being desktop-sized everywhere.
+      className="relative h-[58vh] min-h-[420px] w-full overflow-hidden sm:h-[68vh] sm:min-h-[480px] lg:h-[78vh] lg:min-h-[520px]"
+      onMouseEnter={() => setPaused(true)}
+      onMouseLeave={() => setPaused(false)}
+    >
       {items.map((it, idx) => (
         <img
           key={it.malId}
@@ -52,8 +60,8 @@ function Hero({ items }: { items: Anime[] }) {
       <div className="absolute inset-0 bg-gradient-to-r from-zinc-950 via-zinc-950/60 to-zinc-950/10" />
       <div className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-transparent to-zinc-950/50" />
 
-      <Container className="relative flex h-full flex-col justify-end pb-16">
-        <div className="max-w-2xl space-y-4">
+      <Container className="relative flex h-full flex-col justify-end pb-8 sm:pb-12 lg:pb-16">
+        <div className="max-w-2xl space-y-3 sm:space-y-4">
           <div className="flex flex-wrap items-center gap-2">
             <Badge className="border-red-500/40 bg-red-500/10 text-red-300">Featured</Badge>
             {a.score ? (
@@ -65,24 +73,24 @@ function Hero({ items }: { items: Anime[] }) {
             {a.year && <Badge>{a.year}</Badge>}
             {a.episodes && <Badge>{a.episodes} episodes</Badge>}
           </div>
-          <h1 className="text-4xl font-bold leading-[1.05] tracking-tight text-white drop-shadow sm:text-5xl lg:text-6xl">{titleOf(a)}</h1>
-          <p className="line-clamp-3 max-w-xl text-sm leading-relaxed text-zinc-300 sm:text-base">{cleanDesc(a.synopsis)}</p>
-          <div className="flex flex-wrap gap-2 pt-1">
+          <h1 className="text-3xl font-bold leading-[1.05] tracking-tight text-white drop-shadow sm:text-5xl lg:text-6xl">{titleOf(a)}</h1>
+          <p className="line-clamp-2 max-w-xl text-sm leading-relaxed text-zinc-300 sm:line-clamp-3 sm:text-base">{cleanDesc(a.synopsis)}</p>
+          <div className="hidden flex-wrap gap-2 pt-1 sm:flex">
             {a.genres?.slice(0, 4).map((g) => (
               <span key={g} className="text-xs text-zinc-400">#{g}</span>
             ))}
           </div>
-          <div className="flex items-center gap-3 pt-2">
-            <Link to={href.watch(a.malId, 1)} className="inline-flex h-11 items-center gap-2 rounded-full bg-red-600 px-6 text-sm font-semibold text-white shadow-lg shadow-red-900/40 transition hover:bg-red-500 active:scale-[0.98]">
+          <div className="flex items-center gap-3 pt-1 sm:pt-2">
+            <Link to={href.watch(a.malId, 1)} className="inline-flex h-11 items-center gap-2 rounded-full bg-red-600 px-5 text-sm font-semibold text-white shadow-lg shadow-red-900/40 transition hover:bg-red-500 active:scale-[0.98] sm:px-6">
               <Icon.Play className="h-4 w-4" /> Watch now
             </Link>
-            <Link to={href.anime(a.malId)} className="inline-flex h-11 items-center rounded-full border border-white/15 bg-white/5 px-6 text-sm font-medium text-zinc-100 backdrop-blur transition hover:bg-white/10">
+            <Link to={href.anime(a.malId)} className="inline-flex h-11 items-center rounded-full border border-white/15 bg-white/5 px-5 text-sm font-medium text-zinc-100 backdrop-blur transition hover:bg-white/10 sm:px-6">
               Details
             </Link>
           </div>
         </div>
 
-        <div className="mt-10 flex items-center gap-2">
+        <div className="mt-5 flex items-center gap-2 sm:mt-10">
           {items.map((it, idx) => (
             <button key={it.malId} onClick={() => setI(idx)} aria-label={titleOf(it)} className={cn("h-1 rounded-full transition-all", idx === i ? "w-8 bg-red-500" : "w-4 bg-white/25 hover:bg-white/50")} />
           ))}
@@ -102,7 +110,7 @@ function ContinueWatching() {
         {progress.map((p) => {
           const pct = p.duration ? (p.time / p.duration) * 100 : 0;
           return (
-            <div key={p.animeId} className="group relative w-[220px] shrink-0 snap-start sm:w-[260px]">
+            <div key={p.animeId} className="group relative w-[190px] shrink-0 snap-start sm:w-[220px] lg:w-[260px]">
               <Link to={href.watch(p.animeId, p.episode, p.audio)} className="block overflow-hidden rounded-xl ring-1 ring-white/5">
                 <div className="relative aspect-video bg-zinc-900">
                   <img src={p.cover} alt={p.title} loading="lazy" className="h-full w-full object-cover object-top transition duration-500 group-hover:scale-105" />
@@ -126,7 +134,7 @@ function ContinueWatching() {
               <button
                 onClick={() => removeProgress(p.animeId)}
                 aria-label="Remove"
-                className="absolute right-2 top-2 grid h-7 w-7 place-items-center rounded-full bg-black/60 text-zinc-300 opacity-0 backdrop-blur transition hover:bg-black/80 hover:text-white group-hover:opacity-100"
+                className="absolute right-2 top-2 grid h-8 w-8 place-items-center rounded-full bg-black/60 text-zinc-300 opacity-100 backdrop-blur transition hover:bg-black/80 hover:text-white sm:opacity-0 sm:group-hover:opacity-100"
               >
                 <Icon.X className="h-3.5 w-3.5" />
               </button>
@@ -222,7 +230,7 @@ export default function Home() {
   return (
     <div className="pb-20">
       {featured.loading ? (
-        <div className="h-[78vh] min-h-[520px] w-full">
+        <div className="h-[58vh] min-h-[420px] w-full sm:h-[68vh] sm:min-h-[480px] lg:h-[78vh] lg:min-h-[520px]">
           <Skeleton className="h-full w-full rounded-none" />
         </div>
       ) : featured.error ? (
@@ -233,7 +241,7 @@ export default function Home() {
         <Hero items={featured.data ?? []} />
       )}
 
-      <Container className="-mt-10 space-y-12">
+      <Container className="-mt-6 space-y-10 sm:-mt-10 sm:space-y-12">
         <ContinueWatching />
         <Recommended />
         <AnimeRow title="Trending now" ids={TRENDING_IDS} />

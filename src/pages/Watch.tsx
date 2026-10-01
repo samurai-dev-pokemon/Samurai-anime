@@ -296,7 +296,7 @@ export default function Watch() {
                   </label>
                 )}
 
-                <button onClick={() => goEp(ep - 1)} disabled={ep <= 1} className="grid h-9 w-9 place-items-center rounded-full border border-white/10 bg-white/5 text-zinc-300 transition hover:bg-white/10 disabled:opacity-30">
+                <button onClick={() => goEp(ep - 1)} disabled={ep <= 1} className="grid h-10 w-10 place-items-center rounded-full border border-white/10 bg-white/5 text-zinc-300 transition hover:bg-white/10 disabled:opacity-30 sm:h-9 sm:w-9">
                   <Icon.ChevronLeft className="h-4 w-4" />
                 </button>
                 <button
@@ -363,7 +363,7 @@ export default function Watch() {
               </div>
             )}
 
-            <div className="grid max-h-[520px] grid-cols-5 gap-2 overflow-y-auto rounded-xl border border-white/10 bg-white/[0.03] p-3 sm:grid-cols-6 lg:grid-cols-5">
+           <div className="grid max-h-[520px] grid-cols-4 gap-2 overflow-y-auto rounded-xl border border-white/10 bg-white/[0.03] p-3 sm:grid-cols-6 lg:grid-cols-5">
               {episodesLoading
                 ? Array.from({ length: 20 }).map((_, i) => <Skeleton key={i} className="aspect-square" />)
                 : visibleEpisodes.map((n) => {

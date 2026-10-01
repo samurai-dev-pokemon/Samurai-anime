@@ -18,6 +18,10 @@ const SUB_SCALE_MIN = 0.6;
 const SUB_SCALE_MAX = 2.2;
 const SUB_SCALE_STEP = 0.1;
 
+/** Crude touch-device check — used to switch the controls UX from
+ * hover-based (desktop) to tap-based (mobile/tablet). */
+const isTouchDevice = typeof window !== "undefined" && ("ontouchstart" in window || navigator.maxTouchPoints > 0);
+
 export default function VideoPlayer({
   stream,
   onProgress,
@@ -47,7 +51,7 @@ export default function VideoPlayer({
   const [duration, setDuration] = useState(0);
   const [volume, setVolume] = useState(1);
   const [muted, setMuted] = useState(false);
-  const [volumeHover, setVolumeHover] = useState(false);
+  const [volumePanelOpen, setVolumePanelOpen] = useState(false);
   const [showControls, setShowControls] = useState(true);
   const [fullscreen, setFullscreen] = useState(false);
   const [errored, setErrored] = useState<string | null>(null);
@@ -57,6 +61,9 @@ export default function VideoPlayer({
   const [subFlash, setSubFlash] = useState<string | null>(null);
   const subFlashTimer = useRef<number | null>(null);
   const hideTimer = useRef<number | null>(null);
+  const lastTapRef = useRef<{ time: number; x: number } | null>(null);
+  const scrubbing = useRef(false);
+  const barRef = useRef<HTMLDivElement>(null);
 
   const src = stream?.hlsProxyUrl || stream?.m3u8 || stream?.mp4 || "";
   const isHls = !!(stream?.hlsProxyUrl || stream?.m3u8) && stream?.playbackMode !== "mp4";
@@ -181,9 +188,13 @@ export default function VideoPlayer({
   }, [stream, subtitlesEnabled]);
 
   useEffect(() => {
-    const onFsChange = () => setFullscreen(!!document.fullscreenElement);
+    const onFsChange = () => setFullscreen(!!document.fullscreenElement || !!(document as any).webkitFullscreenElement);
     document.addEventListener("fullscreenchange", onFsChange);
-    return () => document.removeEventListener("fullscreenchange", onFsChange);
+    document.addEventListener("webkitfullscreenchange", onFsChange as any);
+    return () => {
+      document.removeEventListener("fullscreenchange", onFsChange);
+      document.removeEventListener("webkitfullscreenchange", onFsChange as any);
+    };
   }, []);
 
   function seekBy(delta: number) {
@@ -252,9 +263,12 @@ export default function VideoPlayer({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [duration, src]);
 
-  function seek(pct: number) {
+  function seekToClientX(clientX: number) {
+    const bar = barRef.current;
     const video = videoRef.current;
-    if (!video || !duration) return;
+    if (!bar || !video || !duration) return;
+    const rect = bar.getBoundingClientRect();
+    const pct = Math.min(1, Math.max(0, (clientX - rect.left) / rect.width));
     video.currentTime = pct * duration;
   }
 
@@ -276,9 +290,20 @@ export default function VideoPlayer({
 
   function toggleFullscreen() {
     const wrap = wrapRef.current;
-    if (!wrap) return;
-    if (!document.fullscreenElement) wrap.requestFullscreen?.();
-    else document.exitFullscreen?.();
+    const video = videoRef.current as any;
+    if (!document.fullscreenElement && !(document as any).webkitFullscreenElement) {
+      // iOS Safari only supports fullscreen on the <video> element itself.
+      if (video?.webkitEnterFullscreen) {
+        video.webkitEnterFullscreen();
+      } else if (wrap?.requestFullscreen) {
+        wrap.requestFullscreen();
+      } else if ((wrap as any)?.webkitRequestFullscreen) {
+        (wrap as any).webkitRequestFullscreen();
+      }
+    } else {
+      if (document.exitFullscreen) document.exitFullscreen();
+      else if ((document as any).webkitExitFullscreen) (document as any).webkitExitFullscreen();
+    }
   }
 
   function resetHideTimer() {
@@ -287,6 +312,41 @@ export default function VideoPlayer({
     hideTimer.current = window.setTimeout(() => {
       if (playing) setShowControls(false);
     }, 2800);
+  }
+
+  /** Tap anywhere on the video on mobile: first tap reveals controls,
+   * a second tap (not a double-tap-to-seek zone) toggles play/pause.
+   * This is the thing that was fully broken before — on touch devices
+   * there was no way to bring the control bar back once it auto-hid. */
+  function handleVideoTap(e: React.MouseEvent | React.TouchEvent) {
+    if (!isTouchDevice) {
+      togglePlay();
+      return;
+    }
+
+    const clientX = "touches" in e && e.touches.length ? e.touches[0].clientX : (e as React.MouseEvent).clientX;
+    const rect = wrapRef.current?.getBoundingClientRect();
+    const now = Date.now();
+    const isDoubleTap = !!lastTapRef.current && now - lastTapRef.current.time < 300 && Math.abs((lastTapRef.current.x ?? 0) - clientX) < 60;
+
+    if (isDoubleTap && rect) {
+      const relX = clientX - rect.left;
+      if (relX < rect.width * 0.4) seekBy(-10);
+      else if (relX > rect.width * 0.6) seekBy(10);
+      else togglePlay();
+      lastTapRef.current = null;
+      resetHideTimer();
+      return;
+    }
+
+    lastTapRef.current = { time: now, x: clientX };
+
+    if (!showControls) {
+      resetHideTimer();
+    } else {
+      togglePlay();
+      resetHideTimer();
+    }
   }
 
   if (needsEmbed) {
@@ -310,8 +370,6 @@ export default function VideoPlayer({
 
   const pct = duration ? (time / duration) * 100 : 0;
 
-  // Aniskip / scraper-provided intro & outro windows — button only shows
-  // while currentTime actually falls inside the interval.
   const introActive = !!stream?.intro && time >= stream.intro.start && time < stream.intro.end;
   const outroActive = !!stream?.outro && time >= stream.outro.start && time < stream.outro.end;
   const skipTarget = introActive ? stream?.intro?.end : outroActive ? stream?.outro?.end : null;
@@ -320,13 +378,21 @@ export default function VideoPlayer({
   return (
     <div
       ref={wrapRef}
-      className="group relative aspect-video w-full overflow-hidden rounded-xl bg-black shadow-2xl shadow-black/60 ring-1 ring-white/10"
-      onMouseMove={resetHideTimer}
-      onMouseLeave={() => playing && setShowControls(false)}
+      className="group relative aspect-video w-full touch-none select-none overflow-hidden rounded-xl bg-black shadow-2xl shadow-black/60 ring-1 ring-white/10 sm:touch-auto"
+      onMouseMove={!isTouchDevice ? resetHideTimer : undefined}
+      onMouseLeave={!isTouchDevice ? () => playing && setShowControls(false) : undefined}
     >
       <style>{`#${videoId}::cue { font-size: ${subtitleScale}em; }`}</style>
 
-      <video id={videoId} ref={videoRef} className="h-full w-full" onClick={togglePlay} playsInline crossOrigin="anonymous">
+      <video
+        id={videoId}
+        ref={videoRef}
+        className="h-full w-full"
+        onClick={handleVideoTap as any}
+        onTouchEnd={isTouchDevice ? (handleVideoTap as any) : undefined}
+        playsInline
+        crossOrigin="anonymous"
+      >
         {stream?.subtitles?.map((s) => (
           <track key={s.url} src={s.url} kind="subtitles" srcLang="en" label={s.lang} default={s.default} />
         ))}
@@ -342,9 +408,13 @@ export default function VideoPlayer({
         <div className="absolute inset-0 grid place-items-center bg-black/80 px-6 text-center text-sm text-red-200">{errored}</div>
       )}
 
-      {!playing && ready && !buffering && (
+      {!playing && ready && !buffering && showControls && (
         <button
-          onClick={togglePlay}
+          onClick={(e) => {
+            e.stopPropagation();
+            togglePlay();
+            resetHideTimer();
+          }}
           className="absolute inset-0 grid place-items-center bg-black/10 transition hover:bg-black/20"
           aria-label="Play"
         >
@@ -369,59 +439,105 @@ export default function VideoPlayer({
         </div>
       )}
 
-      {/* Intro/Outro skip button — persistently visible while active,
-          regardless of whether the rest of the control bar is faded out,
-          matching the behavior of most streaming sites (Crunchyroll, etc). */}
       {skipLabel && skipTarget != null && (
         <button
-          onClick={() => jumpTo(skipTarget)}
-          className="absolute bottom-20 right-4 z-20 flex items-center gap-2 rounded-lg border border-white/10 bg-black/80 px-4 py-2.5 text-sm font-semibold text-white shadow-lg backdrop-blur transition hover:scale-[1.03] hover:bg-black/95 sm:bottom-24 sm:right-6"
+          onClick={(e) => {
+            e.stopPropagation();
+            jumpTo(skipTarget);
+          }}
+          className="absolute bottom-20 right-3 z-20 flex min-h-[44px] items-center gap-2 rounded-lg border border-white/10 bg-black/80 px-4 py-2.5 text-xs font-semibold text-white shadow-lg backdrop-blur transition active:scale-95 sm:bottom-24 sm:right-6 sm:text-sm"
         >
           {skipLabel}
           <Icon.SkipForward className="h-4 w-4" />
         </button>
       )}
 
-      <div className={cn("absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/95 via-black/50 to-transparent px-3 pb-2 pt-10 transition-opacity duration-300 sm:px-5", showControls ? "opacity-100" : "pointer-events-none opacity-0")}>
+      <div
+        className={cn(
+          "absolute inset-x-0 bottom-0 bg-gradient-to-t from-black/95 via-black/50 to-transparent px-2 pb-2 pt-10 transition-opacity duration-300 sm:px-5",
+          showControls ? "opacity-100" : "pointer-events-none opacity-0",
+        )}
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Seek bar — now supports touch drag, and has a bigger invisible
+            hit area (py-2 wrapper) so it's actually draggable with a thumb. */}
         <div
-          className="group/bar relative mb-2 h-1.5 w-full cursor-pointer rounded-full bg-white/20"
-          onClick={(e) => {
-            const rect = e.currentTarget.getBoundingClientRect();
-            seek((e.clientX - rect.left) / rect.width);
+          ref={barRef}
+          className="group/bar relative mb-2 flex h-5 w-full cursor-pointer items-center"
+          onMouseDown={(e) => {
+            scrubbing.current = true;
+            seekToClientX(e.clientX);
+            const onMove = (ev: MouseEvent) => scrubbing.current && seekToClientX(ev.clientX);
+            const onUp = () => {
+              scrubbing.current = false;
+              window.removeEventListener("mousemove", onMove);
+              window.removeEventListener("mouseup", onUp);
+            };
+            window.addEventListener("mousemove", onMove);
+            window.addEventListener("mouseup", onUp);
+          }}
+          onTouchStart={(e) => {
+            scrubbing.current = true;
+            seekToClientX(e.touches[0].clientX);
+          }}
+          onTouchMove={(e) => {
+            if (scrubbing.current) seekToClientX(e.touches[0].clientX);
+          }}
+          onTouchEnd={() => {
+            scrubbing.current = false;
           }}
         >
-          <div className="h-full rounded-full bg-red-600" style={{ width: `${pct}%` }} />
-          <div className="absolute -top-1 h-3.5 w-3.5 -translate-x-1/2 rounded-full bg-red-500 opacity-0 shadow transition group-hover/bar:opacity-100" style={{ left: `${pct}%` }} />
+          <div className="pointer-events-none h-1.5 w-full rounded-full bg-white/20">
+            <div className="h-full rounded-full bg-red-600" style={{ width: `${pct}%` }} />
+          </div>
+          <div
+            className="pointer-events-none absolute h-3.5 w-3.5 -translate-x-1/2 rounded-full bg-red-500 opacity-0 shadow transition group-hover/bar:opacity-100 sm:opacity-0"
+            style={{ left: `${pct}%` }}
+          />
         </div>
 
-        <div className="flex flex-wrap items-center gap-3 text-white">
-          <button onClick={() => seekBy(-10)} aria-label="Rewind 10 seconds" className="text-zinc-300 transition hover:text-white">
+        <div className="flex flex-wrap items-center gap-1 text-white sm:gap-3">
+          <button
+            onClick={() => seekBy(-10)}
+            aria-label="Rewind 10 seconds"
+            className="grid h-11 w-11 shrink-0 place-items-center text-zinc-300 transition hover:text-white sm:h-auto sm:w-auto"
+          >
             <Icon.Rewind10 className="h-5 w-5" />
           </button>
 
-          <button onClick={togglePlay} aria-label="Play/Pause">
+          <button onClick={togglePlay} aria-label="Play/Pause" className="grid h-11 w-11 shrink-0 place-items-center sm:h-auto sm:w-auto">
             {playing ? <Icon.Pause className="h-5 w-5" /> : <Icon.Play className="h-5 w-5" />}
           </button>
 
-          <button onClick={() => seekBy(10)} aria-label="Forward 10 seconds" className="text-zinc-300 transition hover:text-white">
+          <button
+            onClick={() => seekBy(10)}
+            aria-label="Forward 10 seconds"
+            className="grid h-11 w-11 shrink-0 place-items-center text-zinc-300 transition hover:text-white sm:h-auto sm:w-auto"
+          >
             <Icon.Forward10 className="h-5 w-5" />
           </button>
 
           {hasNext && (
-            <button onClick={onNext} aria-label="Next episode" className="text-zinc-300 hover:text-white">
-              <svg viewBox="0 0 24 24" fill="currentColor" className="h-4.5 w-4.5"><path d="M6 4l10 8-10 8V4zM18 4h2v16h-2z" /></svg>
+            <button onClick={onNext} aria-label="Next episode" className="grid h-11 w-11 shrink-0 place-items-center text-zinc-300 hover:text-white sm:h-auto sm:w-auto">
+              <svg viewBox="0 0 24 24" fill="currentColor" className="h-[18px] w-[18px]"><path d="M6 4l10 8-10 8V4zM18 4h2v16h-2z" /></svg>
             </button>
           )}
 
+          {/* Volume: hover-to-reveal on desktop, tap-to-toggle on touch
+              devices — this was previously unreachable on mobile entirely. */}
           <div
             className="group/vol flex items-center gap-1.5"
-            onMouseEnter={() => setVolumeHover(true)}
-            onMouseLeave={() => setVolumeHover(false)}
+            onMouseEnter={!isTouchDevice ? () => setVolumePanelOpen(true) : undefined}
+            onMouseLeave={!isTouchDevice ? () => setVolumePanelOpen(false) : undefined}
           >
-            <button onClick={toggleMute} aria-label="Mute">
-              {muted || volume === 0 ? <Icon.Mute className="h-4.5 w-4.5" /> : <Icon.Volume className="h-4.5 w-4.5" />}
+            <button
+              onClick={() => (isTouchDevice ? setVolumePanelOpen((v) => !v) : toggleMute())}
+              aria-label="Mute"
+              className="grid h-11 w-11 shrink-0 place-items-center sm:h-auto sm:w-auto"
+            >
+              {muted || volume === 0 ? <Icon.Mute className="h-[18px] w-[18px]" /> : <Icon.Volume className="h-[18px] w-[18px]" />}
             </button>
-            <div className={cn("overflow-hidden transition-all duration-200", volumeHover ? "w-16" : "w-0")}>
+            <div className={cn("overflow-hidden transition-all duration-200", volumePanelOpen ? "w-16" : "w-0")}>
               <input
                 type="range"
                 min={0}
@@ -429,53 +545,64 @@ export default function VideoPlayer({
                 step={0.05}
                 value={muted ? 0 : volume}
                 onChange={(e) => changeVolume(Number(e.target.value))}
-                onFocus={() => setVolumeHover(true)}
-                onBlur={() => setVolumeHover(false)}
+                onFocus={() => setVolumePanelOpen(true)}
+                onBlur={() => !isTouchDevice && setVolumePanelOpen(false)}
                 className="volume-slider h-1 w-16"
               />
             </div>
+            {isTouchDevice && (
+              <button
+                onClick={() => toggleMute()}
+                className="hidden"
+                aria-hidden
+              />
+            )}
           </div>
 
           {hasSubtitles && (
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-0.5">
               <button
                 onClick={() => bumpSubtitleScale(-SUB_SCALE_STEP)}
                 disabled={!subtitlesEnabled}
                 aria-label="Decrease subtitle size"
-                className="grid h-6 w-6 place-items-center rounded text-sm font-bold text-zinc-300 transition hover:bg-white/10 hover:text-white disabled:opacity-30"
+                className="grid h-9 w-9 shrink-0 place-items-center rounded text-sm font-bold text-zinc-300 transition hover:bg-white/10 hover:text-white disabled:opacity-30 sm:h-6 sm:w-6"
               >
                 −
               </button>
               <button
                 onClick={() => setSubtitlesEnabled((v) => !v)}
                 aria-label="Toggle subtitles"
-                className={cn("transition", subtitlesEnabled ? "text-white" : "text-zinc-500 hover:text-white")}
+                className={cn("grid h-9 w-9 shrink-0 place-items-center transition sm:h-auto sm:w-auto", subtitlesEnabled ? "text-white" : "text-zinc-500 hover:text-white")}
               >
-                {subtitlesEnabled ? <Icon.Captions className="h-4.5 w-4.5" /> : <Icon.CaptionsOff className="h-4.5 w-4.5" />}
+                {subtitlesEnabled ? <Icon.Captions className="h-[18px] w-[18px]" /> : <Icon.CaptionsOff className="h-[18px] w-[18px]" />}
               </button>
               <button
                 onClick={() => bumpSubtitleScale(SUB_SCALE_STEP)}
                 disabled={!subtitlesEnabled}
                 aria-label="Increase subtitle size"
-                className="grid h-6 w-6 place-items-center rounded text-sm font-bold text-zinc-300 transition hover:bg-white/10 hover:text-white disabled:opacity-30"
+                className="grid h-9 w-9 shrink-0 place-items-center rounded text-sm font-bold text-zinc-300 transition hover:bg-white/10 hover:text-white disabled:opacity-30 sm:h-6 sm:w-6"
               >
                 +
               </button>
             </div>
           )}
 
-          <span className="text-xs tabular-nums text-zinc-300">
+          <span className="order-last ml-auto text-[11px] tabular-nums text-zinc-300 sm:order-none sm:ml-0 sm:text-xs">
             {fmt(time)} / {fmt(duration)}
           </span>
 
-          {title && <span className="ml-2 hidden max-w-[240px] truncate text-xs text-zinc-400 sm:block">{title}</span>}
+          {title && <span className="hidden max-w-[240px] truncate text-xs text-zinc-400 sm:ml-2 sm:block">{title}</span>}
 
-          <div className="ml-auto flex items-center gap-3">
+          <div className="ml-auto flex items-center gap-1 sm:gap-3">
             <span className="hidden items-center gap-1 rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold text-zinc-300 sm:flex">
               <Icon.Shield className="h-3 w-3 text-green-400" /> Ad-free stream
             </span>
-            <button onClick={toggleFullscreen} aria-label="Fullscreen" className={cn(fullscreen && "text-red-400")}>
-              <Icon.Expand className="h-4.5 w-4.5" />
+            <button
+              onClick={toggleFullscreen}
+              aria-label="Fullscreen"
+              className={cn("grid h-11 w-11 shrink-0 place-items-center sm:h-auto sm:w-auto", fullscreen && "text-red-400")}
+            >
+              <Icon.Expand className="h-[18px] w-[18px]" />
             </button>
           </div>
         </div>
