@@ -18,8 +18,6 @@ const SUB_SCALE_MIN = 0.6;
 const SUB_SCALE_MAX = 2.2;
 const SUB_SCALE_STEP = 0.1;
 
-/** Crude touch-device check — used to switch the controls UX from
- * hover-based (desktop) to tap-based (mobile/tablet). */
 const isTouchDevice = typeof window !== "undefined" && ("ontouchstart" in window || navigator.maxTouchPoints > 0);
 
 export default function VideoPlayer({
@@ -64,6 +62,7 @@ export default function VideoPlayer({
   const lastTapRef = useRef<{ time: number; x: number } | null>(null);
   const scrubbing = useRef(false);
   const barRef = useRef<HTMLDivElement>(null);
+  const volumeWrapRef = useRef<HTMLDivElement>(null);
 
   const src = stream?.hlsProxyUrl || stream?.m3u8 || stream?.mp4 || "";
   const isHls = !!(stream?.hlsProxyUrl || stream?.m3u8) && stream?.playbackMode !== "mp4";
@@ -197,6 +196,19 @@ export default function VideoPlayer({
     };
   }, []);
 
+  // Closes the volume popover on outside tap — only needed for touch,
+  // since desktop closes it naturally via onMouseLeave.
+  useEffect(() => {
+    if (!isTouchDevice || !volumePanelOpen) return;
+    function onPointerDown(e: PointerEvent) {
+      if (volumeWrapRef.current && !volumeWrapRef.current.contains(e.target as Node)) {
+        setVolumePanelOpen(false);
+      }
+    }
+    document.addEventListener("pointerdown", onPointerDown);
+    return () => document.removeEventListener("pointerdown", onPointerDown);
+  }, [volumePanelOpen]);
+
   function seekBy(delta: number) {
     const video = videoRef.current;
     if (!video) return;
@@ -292,7 +304,6 @@ export default function VideoPlayer({
     const wrap = wrapRef.current;
     const video = videoRef.current as any;
     if (!document.fullscreenElement && !(document as any).webkitFullscreenElement) {
-      // iOS Safari only supports fullscreen on the <video> element itself.
       if (video?.webkitEnterFullscreen) {
         video.webkitEnterFullscreen();
       } else if (wrap?.requestFullscreen) {
@@ -314,10 +325,6 @@ export default function VideoPlayer({
     }, 2800);
   }
 
-  /** Tap anywhere on the video on mobile: first tap reveals controls,
-   * a second tap (not a double-tap-to-seek zone) toggles play/pause.
-   * This is the thing that was fully broken before — on touch devices
-   * there was no way to bring the control bar back once it auto-hid. */
   function handleVideoTap(e: React.MouseEvent | React.TouchEvent) {
     if (!isTouchDevice) {
       togglePlay();
@@ -418,8 +425,8 @@ export default function VideoPlayer({
           className="absolute inset-0 grid place-items-center bg-black/10 transition hover:bg-black/20"
           aria-label="Play"
         >
-          <span className="grid h-16 w-16 place-items-center rounded-full border border-white/20 bg-black/45 text-white shadow-lg backdrop-blur-md transition duration-200 hover:scale-105 hover:border-red-500/50 hover:bg-black/60">
-            <Icon.Play className="ml-1 h-6 w-6" />
+          <span className="grid h-14 w-14 place-items-center rounded-full border border-white/20 bg-black/45 text-white shadow-lg backdrop-blur-md transition duration-200 hover:scale-105 hover:border-red-500/50 hover:bg-black/60 sm:h-16 sm:w-16">
+            <Icon.Play className="ml-1 h-5 w-5 sm:h-6 sm:w-6" />
           </span>
         </button>
       )}
@@ -445,7 +452,7 @@ export default function VideoPlayer({
             e.stopPropagation();
             jumpTo(skipTarget);
           }}
-          className="absolute bottom-20 right-3 z-20 flex min-h-[44px] items-center gap-2 rounded-lg border border-white/10 bg-black/80 px-4 py-2.5 text-xs font-semibold text-white shadow-lg backdrop-blur transition active:scale-95 sm:bottom-24 sm:right-6 sm:text-sm"
+          className="absolute bottom-16 right-3 z-20 flex min-h-[40px] items-center gap-2 rounded-lg border border-white/10 bg-black/80 px-3.5 py-2 text-xs font-semibold text-white shadow-lg backdrop-blur transition active:scale-95 sm:bottom-20 sm:right-6 sm:px-4 sm:text-sm"
         >
           {skipLabel}
           <Icon.SkipForward className="h-4 w-4" />
@@ -459,8 +466,6 @@ export default function VideoPlayer({
         )}
         onClick={(e) => e.stopPropagation()}
       >
-        {/* Seek bar — now supports touch drag, and has a bigger invisible
-            hit area (py-2 wrapper) so it's actually draggable with a thumb. */}
         <div
           ref={barRef}
           className="group/bar relative mb-2 flex h-5 w-full cursor-pointer items-center"
@@ -491,117 +496,115 @@ export default function VideoPlayer({
             <div className="h-full rounded-full bg-red-600" style={{ width: `${pct}%` }} />
           </div>
           <div
-            className="pointer-events-none absolute h-3.5 w-3.5 -translate-x-1/2 rounded-full bg-red-500 opacity-0 shadow transition group-hover/bar:opacity-100 sm:opacity-0"
+            className="pointer-events-none absolute h-3.5 w-3.5 -translate-x-1/2 rounded-full bg-red-500 opacity-0 shadow transition group-hover/bar:opacity-100"
             style={{ left: `${pct}%` }}
           />
         </div>
 
-        <div className="flex flex-wrap items-center gap-1 text-white sm:gap-3">
-          <button
-            onClick={() => seekBy(-10)}
-            aria-label="Rewind 10 seconds"
-            className="grid h-11 w-11 shrink-0 place-items-center text-zinc-300 transition hover:text-white sm:h-auto sm:w-auto"
-          >
+        {/* Single row, split into a left "transport" cluster and a right
+            "everything else" cluster via one ml-auto — no wrapping, no
+            reordering hacks. Sized so it fits down to ~320px screens. */}
+        <div className="flex flex-nowrap items-center gap-1 text-white sm:gap-3">
+          <button onClick={() => seekBy(-10)} aria-label="Rewind 10 seconds" className="grid h-9 w-9 shrink-0 place-items-center text-zinc-300 transition hover:text-white sm:h-auto sm:w-auto">
             <Icon.Rewind10 className="h-5 w-5" />
           </button>
 
-          <button onClick={togglePlay} aria-label="Play/Pause" className="grid h-11 w-11 shrink-0 place-items-center sm:h-auto sm:w-auto">
+          <button onClick={togglePlay} aria-label="Play/Pause" className="grid h-10 w-10 shrink-0 place-items-center sm:h-auto sm:w-auto">
             {playing ? <Icon.Pause className="h-5 w-5" /> : <Icon.Play className="h-5 w-5" />}
           </button>
 
-          <button
-            onClick={() => seekBy(10)}
-            aria-label="Forward 10 seconds"
-            className="grid h-11 w-11 shrink-0 place-items-center text-zinc-300 transition hover:text-white sm:h-auto sm:w-auto"
-          >
+          <button onClick={() => seekBy(10)} aria-label="Forward 10 seconds" className="grid h-9 w-9 shrink-0 place-items-center text-zinc-300 transition hover:text-white sm:h-auto sm:w-auto">
             <Icon.Forward10 className="h-5 w-5" />
           </button>
 
+          {/* Next-episode arrow hidden on mobile — Watch.tsx already has
+              dedicated prev/next buttons below the player, so this was
+              just an extra button crowding an already-tight row. */}
           {hasNext && (
-            <button onClick={onNext} aria-label="Next episode" className="grid h-11 w-11 shrink-0 place-items-center text-zinc-300 hover:text-white sm:h-auto sm:w-auto">
+            <button onClick={onNext} aria-label="Next episode" className="hidden shrink-0 text-zinc-300 hover:text-white sm:grid sm:h-auto sm:w-auto sm:place-items-center">
               <svg viewBox="0 0 24 24" fill="currentColor" className="h-[18px] w-[18px]"><path d="M6 4l10 8-10 8V4zM18 4h2v16h-2z" /></svg>
             </button>
           )}
 
-          {/* Volume: hover-to-reveal on desktop, tap-to-toggle on touch
-              devices — this was previously unreachable on mobile entirely. */}
-          <div
-            className="group/vol flex items-center gap-1.5"
-            onMouseEnter={!isTouchDevice ? () => setVolumePanelOpen(true) : undefined}
-            onMouseLeave={!isTouchDevice ? () => setVolumePanelOpen(false) : undefined}
-          >
-            <button
-              onClick={() => (isTouchDevice ? setVolumePanelOpen((v) => !v) : toggleMute())}
-              aria-label="Mute"
-              className="grid h-11 w-11 shrink-0 place-items-center sm:h-auto sm:w-auto"
-            >
-              {muted || volume === 0 ? <Icon.Mute className="h-[18px] w-[18px]" /> : <Icon.Volume className="h-[18px] w-[18px]" />}
-            </button>
-            <div className={cn("overflow-hidden transition-all duration-200", volumePanelOpen ? "w-16" : "w-0")}>
-              <input
-                type="range"
-                min={0}
-                max={1}
-                step={0.05}
-                value={muted ? 0 : volume}
-                onChange={(e) => changeVolume(Number(e.target.value))}
-                onFocus={() => setVolumePanelOpen(true)}
-                onBlur={() => !isTouchDevice && setVolumePanelOpen(false)}
-                className="volume-slider h-1 w-16"
-              />
-            </div>
-            {isTouchDevice && (
-              <button
-                onClick={() => toggleMute()}
-                className="hidden"
-                aria-hidden
-              />
-            )}
-          </div>
-
-          {hasSubtitles && (
-            <div className="flex items-center gap-0.5">
-              <button
-                onClick={() => bumpSubtitleScale(-SUB_SCALE_STEP)}
-                disabled={!subtitlesEnabled}
-                aria-label="Decrease subtitle size"
-                className="grid h-9 w-9 shrink-0 place-items-center rounded text-sm font-bold text-zinc-300 transition hover:bg-white/10 hover:text-white disabled:opacity-30 sm:h-6 sm:w-6"
-              >
-                −
-              </button>
-              <button
-                onClick={() => setSubtitlesEnabled((v) => !v)}
-                aria-label="Toggle subtitles"
-                className={cn("grid h-9 w-9 shrink-0 place-items-center transition sm:h-auto sm:w-auto", subtitlesEnabled ? "text-white" : "text-zinc-500 hover:text-white")}
-              >
-                {subtitlesEnabled ? <Icon.Captions className="h-[18px] w-[18px]" /> : <Icon.CaptionsOff className="h-[18px] w-[18px]" />}
-              </button>
-              <button
-                onClick={() => bumpSubtitleScale(SUB_SCALE_STEP)}
-                disabled={!subtitlesEnabled}
-                aria-label="Increase subtitle size"
-                className="grid h-9 w-9 shrink-0 place-items-center rounded text-sm font-bold text-zinc-300 transition hover:bg-white/10 hover:text-white disabled:opacity-30 sm:h-6 sm:w-6"
-              >
-                +
-              </button>
-            </div>
-          )}
-
-          <span className="order-last ml-auto text-[11px] tabular-nums text-zinc-300 sm:order-none sm:ml-0 sm:text-xs">
-            {fmt(time)} / {fmt(duration)}
-          </span>
-
-          {title && <span className="hidden max-w-[240px] truncate text-xs text-zinc-400 sm:ml-2 sm:block">{title}</span>}
-
           <div className="ml-auto flex items-center gap-1 sm:gap-3">
-            <span className="hidden items-center gap-1 rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold text-zinc-300 sm:flex">
+            {/* Volume — now a popover anchored above the button instead of
+                an inline-growing slider, so opening it never changes the
+                row's width or causes a wrap. Hover opens it on desktop,
+                tap toggles it on touch. */}
+            <div
+              ref={volumeWrapRef}
+              className="relative"
+              onMouseEnter={!isTouchDevice ? () => setVolumePanelOpen(true) : undefined}
+              onMouseLeave={!isTouchDevice ? () => setVolumePanelOpen(false) : undefined}
+            >
+              <button
+                onClick={() => (isTouchDevice ? setVolumePanelOpen((v) => !v) : toggleMute())}
+                aria-label="Mute"
+                className="grid h-9 w-9 shrink-0 place-items-center sm:h-auto sm:w-auto"
+              >
+                {muted || volume === 0 ? <Icon.Mute className="h-[18px] w-[18px]" /> : <Icon.Volume className="h-[18px] w-[18px]" />}
+              </button>
+              {volumePanelOpen && (
+                <div
+                  className="absolute bottom-full right-0 mb-2 w-28 rounded-lg border border-white/10 bg-zinc-950/95 p-2.5 shadow-xl backdrop-blur"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  <input
+                    type="range"
+                    min={0}
+                    max={1}
+                    step={0.05}
+                    value={muted ? 0 : volume}
+                    onChange={(e) => changeVolume(Number(e.target.value))}
+                    className="volume-slider h-1 w-full"
+                  />
+                </div>
+              )}
+            </div>
+
+            {hasSubtitles && (
+              <div className="flex items-center gap-0.5">
+                {/* Subtitle size +/- hidden on mobile — captions toggle
+                    alone is kept since that's the control people actually
+                    need in a hurry; resizing is a nice-to-have that was
+                    eating row space on small screens. */}
+                <button
+                  onClick={() => bumpSubtitleScale(-SUB_SCALE_STEP)}
+                  disabled={!subtitlesEnabled}
+                  aria-label="Decrease subtitle size"
+                  className="hidden h-6 w-6 place-items-center rounded text-sm font-bold text-zinc-300 transition hover:bg-white/10 hover:text-white disabled:opacity-30 sm:grid"
+                >
+                  −
+                </button>
+                <button
+                  onClick={() => setSubtitlesEnabled((v) => !v)}
+                  aria-label="Toggle subtitles"
+                  className={cn("grid h-9 w-9 shrink-0 place-items-center transition sm:h-auto sm:w-auto", subtitlesEnabled ? "text-white" : "text-zinc-500 hover:text-white")}
+                >
+                  {subtitlesEnabled ? <Icon.Captions className="h-[18px] w-[18px]" /> : <Icon.CaptionsOff className="h-[18px] w-[18px]" />}
+                </button>
+                <button
+                  onClick={() => bumpSubtitleScale(SUB_SCALE_STEP)}
+                  disabled={!subtitlesEnabled}
+                  aria-label="Increase subtitle size"
+                  className="hidden h-6 w-6 place-items-center rounded text-sm font-bold text-zinc-300 transition hover:bg-white/10 hover:text-white disabled:opacity-30 sm:grid"
+                >
+                  +
+                </button>
+              </div>
+            )}
+
+            <span className="shrink-0 text-[11px] tabular-nums text-zinc-300 sm:text-xs">
+              {fmt(time)} / {fmt(duration)}
+            </span>
+
+            {title && <span className="hidden max-w-[240px] truncate text-xs text-zinc-400 sm:block">{title}</span>}
+
+            <span className="hidden items-center gap-1 rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold text-zinc-300 lg:flex">
               <Icon.Shield className="h-3 w-3 text-green-400" /> Ad-free stream
             </span>
-            <button
-              onClick={toggleFullscreen}
-              aria-label="Fullscreen"
-              className={cn("grid h-11 w-11 shrink-0 place-items-center sm:h-auto sm:w-auto", fullscreen && "text-red-400")}
-            >
+
+            <button onClick={toggleFullscreen} aria-label="Fullscreen" className={cn("grid h-9 w-9 shrink-0 place-items-center sm:h-auto sm:w-auto", fullscreen && "text-red-400")}>
               <Icon.Expand className="h-[18px] w-[18px]" />
             </button>
           </div>
