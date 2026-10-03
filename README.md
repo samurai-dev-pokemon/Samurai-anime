@@ -21,8 +21,9 @@
 > [!NOTE]
 > **Samurai Anime 1.1 is here!** Building on the stable 1.0 foundation, this
 > update brings episode notifications, skip intro/outro, episode cover art,
-> and a much better mobile & touch experience. See the
-> [what's next](#-whats-next) section below for what's coming after 1.1.
+> and a much better mobile & touch experience. See
+> [what's new in 1.1](#-whats-new-in-11) below, or jump to
+> [what's next](#-whats-next) for what's coming after.
 
 ---
 
@@ -34,6 +35,20 @@ go. Built to feel like a proper streaming platform: a cinematic home page,
 detailed anime pages, a real video player with sub/dub switching, user
 accounts with profiles, and smart tools that remember what you're watching
 and suggest what to watch next.
+
+---
+
+## 🆕 What's New in 1.1
+
+A quick rundown of everything added since the 1.0 release:
+
+- 🔔 **Episode notifications** — subscribe to any anime and get notified the moment a new episode releases
+- 🖼️ **Episode cover art** — episodes now show real thumbnail art instead of generic placeholders
+- ⏭️ **Skip intro/outro** — auto-detected skip buttons let you jump straight past intros and outros
+- 📱 **Better mobile support** — reworked touch controls on the video player with proper mobile fullscreen support
+- 🔍 **Improved search on mobile** — reworked search handling and refs for a smoother mobile search experience
+- 💬 **Subtitle scaling & toggle** — resize subtitles or turn them off entirely, straight from the player
+- 🔁 **Dub fallback on Watch page** — automatically falls back to sub when a dub track isn't available
 
 ---
 
