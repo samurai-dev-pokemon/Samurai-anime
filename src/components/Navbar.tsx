@@ -3,12 +3,21 @@ import { Link, useNavigate } from "react-router-dom";
 import { cn } from "../utils/cn";
 import { href } from "../utils/router";
 import { useUser, signOutUser } from "../lib/store";
-import { Icon } from "./ui";
+import {
+  checkForNewEpisodes,
+  getNotificationPermission,
+  markAllNotificationsRead,
+  requestNotificationPermission,
+  useNotifications,
+  useUnreadNotificationCount,
+} from "../lib/notifications";
+import { formatRelativeTime, Icon } from "./ui";
 import Logo from "./Logo";
 import AuthModal from "./AuthModal";
 
 const NAV_LINKS = [
   { label: "Home", to: "/" },
+  { label: "Currently Airing", to: "/airing" },
   { label: "Trending", to: "/genre/Trending" },
   { label: "Action", to: "/genre/Action" },
   { label: "Romance", to: "/genre/Romance" },
@@ -21,6 +30,7 @@ export default function Navbar() {
   const [searchOpen, setSearchOpen] = useState(false);
   const [q, setQ] = useState("");
   const [menuOpen, setMenuOpen] = useState(false);
+  const [notifOpen, setNotifOpen] = useState(false);
   const [authMode, setAuthMode] = useState<"signin" | "signup" | null>(null);
   const [mobileOpen, setMobileOpen] = useState(false);
   const user = useUser();
@@ -29,6 +39,10 @@ export default function Navbar() {
   const mobileSearchRef = useRef<HTMLInputElement>(null);
   const desktopSearchWrapRef = useRef<HTMLFormElement>(null);
   const userMenuRef = useRef<HTMLDivElement>(null);
+  const notifWrapRef = useRef<HTMLDivElement>(null);
+
+  const notifications = useNotifications();
+  const unreadCount = useUnreadNotificationCount();
 
   useEffect(() => {
     const onScroll = () => setScrolled(window.scrollY > 24);
@@ -39,15 +53,20 @@ export default function Navbar() {
 
   useEffect(() => {
     if (!searchOpen) return;
-    // Focusing a display:none input is a safe no-op in every browser, so
-    // it's fine to just try both — only the one actually visible for the
-    // current breakpoint will really receive focus.
     desktopSearchRef.current?.focus();
     mobileSearchRef.current?.focus();
   }, [searchOpen]);
 
-  // Outside-click close for the desktop inline search only — the mobile
-  // full-row version is closed explicitly via its back button instead.
+  // Check for newly released/new-episode subscriptions on mount, then
+  // every 10 minutes while the tab stays open. This is a foreground-only
+  // check — see src/lib/notifications.ts for why true background push
+  // isn't possible without a backend.
+  useEffect(() => {
+    checkForNewEpisodes();
+    const interval = setInterval(() => checkForNewEpisodes(), 10 * 60 * 1000);
+    return () => clearInterval(interval);
+  }, []);
+
   useEffect(() => {
     function onPointerDown(e: PointerEvent) {
       const target = e.target as Node;
@@ -57,10 +76,13 @@ export default function Navbar() {
       if (menuOpen && userMenuRef.current && !userMenuRef.current.contains(target)) {
         setMenuOpen(false);
       }
+      if (notifOpen && notifWrapRef.current && !notifWrapRef.current.contains(target)) {
+        setNotifOpen(false);
+      }
     }
     document.addEventListener("pointerdown", onPointerDown);
     return () => document.removeEventListener("pointerdown", onPointerDown);
-  }, [searchOpen, menuOpen]);
+  }, [searchOpen, menuOpen, notifOpen]);
 
   function toggleMobileMenu() {
     setSearchOpen(false);
@@ -75,14 +97,17 @@ export default function Navbar() {
     setQ("");
   }
 
+  function openNotifications() {
+    setNotifOpen((v) => !v);
+    if (!notifOpen) markAllNotificationsRead();
+  }
+
+  const permission = getNotificationPermission();
+
   return (
     <>
       <header className={cn("fixed inset-x-0 top-0 z-50 transition-colors duration-300", scrolled || mobileOpen ? "bg-zinc-950/95 shadow-lg shadow-black/40 backdrop-blur" : "bg-gradient-to-b from-black/80 via-black/40 to-transparent")}>
         <div className="mx-auto flex h-16 w-full max-w-[1700px] items-center gap-2 px-4 sm:gap-4 sm:px-8 lg:px-12">
-          {/* Mobile-only full-row search takeover — replaces the entire
-              header row below the sm: breakpoint so there's nothing else
-              in the row competing for space. At sm: and above this is
-              hidden entirely in favor of the original inline search. */}
           {searchOpen && (
             <form onSubmit={submitSearch} className="flex w-full items-center gap-2 sm:hidden">
               <button
@@ -109,7 +134,6 @@ export default function Navbar() {
             </form>
           )}
 
-          {/* Normal header row — hidden below sm: while mobile search is open. */}
           <div className={cn("flex w-full items-center gap-2 sm:gap-4", searchOpen && "hidden sm:flex")}>
             <button className="grid h-10 w-10 shrink-0 place-items-center rounded-md text-zinc-300 lg:hidden" onClick={toggleMobileMenu} aria-label="Menu">
               <Icon.Menu className="h-5 w-5" />
@@ -128,13 +152,10 @@ export default function Navbar() {
             </nav>
 
             <div className="ml-auto flex items-center gap-2 sm:gap-3">
-              {/* Mobile search trigger — just an icon button, only visible
-                  below sm:. Opens the full-row takeover form above. */}
               <button type="button" onClick={() => setSearchOpen(true)} className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-zinc-300 hover:text-white sm:hidden" aria-label="Search">
                 <Icon.Search className="h-[18px] w-[18px]" />
               </button>
 
-              {/* Original inline-expanding search — unchanged, sm: and up only. */}
               <form
                 ref={desktopSearchWrapRef}
                 onSubmit={submitSearch}
@@ -154,9 +175,70 @@ export default function Navbar() {
                 )}
               </form>
 
-              <button className="hidden h-9 w-9 place-items-center rounded-full text-zinc-300 hover:text-white sm:grid" aria-label="Notifications">
-                <Icon.Bell className="h-[18px] w-[18px]" />
-              </button>
+              {/* Notifications bell — now functional. Shows an unread-count
+                  badge and a dropdown of recent release/episode alerts. */}
+              <div className="relative" ref={notifWrapRef}>
+                <button
+                  onClick={openNotifications}
+                  className="relative grid h-9 w-9 place-items-center rounded-full text-zinc-300 hover:text-white sm:h-9 sm:w-9"
+                  aria-label="Notifications"
+                >
+                  <Icon.Bell className="h-[18px] w-[18px]" />
+                  {unreadCount > 0 && (
+                    <span className="absolute right-1 top-1 grid h-4 w-4 place-items-center rounded-full bg-red-600 text-[9px] font-bold text-white">
+                      {unreadCount > 9 ? "9+" : unreadCount}
+                    </span>
+                  )}
+                </button>
+
+                {notifOpen && (
+                  <div className="absolute right-0 top-11 w-80 max-w-[90vw] overflow-hidden rounded-xl border border-white/10 bg-zinc-950 shadow-xl">
+                    <div className="flex items-center justify-between border-b border-white/10 px-4 py-3">
+                      <p className="text-sm font-semibold text-white">Notifications</p>
+                      {notifications.length > 0 && (
+                        <button onClick={markAllNotificationsRead} className="text-[11px] font-medium text-zinc-500 hover:text-white">
+                          Mark all read
+                        </button>
+                      )}
+                    </div>
+
+                    {permission === "default" && (
+                      <button
+                        onClick={() => requestNotificationPermission()}
+                        className="flex w-full items-center gap-2 border-b border-white/10 bg-red-600/10 px-4 py-2.5 text-left text-xs text-red-300 hover:bg-red-600/15"
+                      >
+                        <Icon.Bell className="h-3.5 w-3.5 shrink-0" />
+                        Enable browser alerts for new episodes
+                      </button>
+                    )}
+
+                    <div className="max-h-80 overflow-y-auto">
+                      {notifications.length === 0 ? (
+                        <p className="px-4 py-6 text-center text-xs text-zinc-500">
+                          No notifications yet. Subscribe to a show from its page to get alerted on release or new episodes.
+                        </p>
+                      ) : (
+                        notifications.map((n) => (
+                          <Link
+                            key={n.id}
+                            to={href.anime(n.animeId)}
+                            onClick={() => setNotifOpen(false)}
+                            className="flex items-start gap-3 border-b border-white/5 px-4 py-3 last:border-0 hover:bg-white/5"
+                          >
+                            <div className="h-12 w-9 shrink-0 overflow-hidden rounded bg-zinc-800">
+                              {n.cover && <img src={n.cover} alt={n.title} className="h-full w-full object-cover" />}
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="line-clamp-2 text-xs text-zinc-200">{n.message}</p>
+                              <p className="mt-0.5 text-[10px] text-zinc-500">{formatRelativeTime(n.createdAt)}</p>
+                            </div>
+                          </Link>
+                        ))
+                      )}
+                    </div>
+                  </div>
+                )}
+              </div>
 
               {user ? (
                 <div className="relative" ref={userMenuRef}>

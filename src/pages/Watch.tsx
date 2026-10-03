@@ -3,7 +3,7 @@ import { Link, useParams, useSearchParams } from "react-router-dom";
 import Comments from "../components/Comments";
 import { cn } from "../utils/cn";
 import { href } from "../utils/router";
-import { findBestStream, getAnimeByMalId, getEpisodeCount, getSkipTimes, resolveWatch, titleOf } from "../lib/api";
+import { findBestStream, formatStatus, getAiredEpisodeCount, getAnimeByMalId, getEpisodeCount, getSkipTimes, resolveWatch, titleOf } from "../lib/api";
 import {
   markEpisodeWatched,
   removeFromWatchlist,
@@ -40,10 +40,18 @@ export default function Watch() {
 
   const { data: anime, loading: animeLoading } = useAsync(() => getAnimeByMalId(id), [id]);
 
+  const status = anime ? formatStatus(anime.status) : "";
+  const isAiring = status === "Airing";
+
+  // For airing shows, MAL's `episodes` is the season's eventual total —
+  // not how many have actually aired. Use the real aired-so-far count so
+  // "Episode X of Y" and the next-episode button can't go past what's
+  // actually been released.
   const { data: episodeCount, loading: episodeCountLoading } = useAsync(async () => {
     if (!anime) return null;
+    if (isAiring) return getAiredEpisodeCount(id);
     return getEpisodeCount(id, anime.episodes);
-  }, [id, anime?.episodes]);
+  }, [id, anime?.episodes, isAiring]);
 
   const totalEpisodes = episodeCount ?? anime?.episodes ?? null;
   const episodesLoading = animeLoading || episodeCountLoading;
@@ -57,8 +65,6 @@ export default function Watch() {
     return findBestStream({ malId: id, ep, type: audio });
   }, [id, ep, audio]);
 
-  // Aniskip fallback — used whenever the scraper's own stream response
-  // doesn't already include intro/outro timestamps for this episode.
   const { data: skipTimes } = useAsync(async () => {
     if (!id || !ep) return null;
     return getSkipTimes(id, ep);
@@ -75,16 +81,9 @@ export default function Watch() {
 
   const activeStream = manualStream || stream || null;
 
-  // When the requested audio is Dub but the API only had Sub for this
-  // episode, `partial` comes back true. If the user has turned sub-fallback
-  // off, don't silently hand them Sub audio when they explicitly asked for
-  // Dub — block playback and show a clear message instead.
   const blockedPartialDub = audio === "dub" && !dubFallbackEnabled && !!activeStream?.partial;
   const rawPlayableStream = blockedPartialDub ? null : activeStream;
 
-  // Merge in Aniskip intro/outro times whenever the scraper didn't already
-  // provide them on the stream object itself. Scraper-provided values (if
-  // any) always win — Aniskip is purely a fallback.
   const playableStream = rawPlayableStream
     ? {
         ...rawPlayableStream,
@@ -296,7 +295,7 @@ export default function Watch() {
                   </label>
                 )}
 
-                <button onClick={() => goEp(ep - 1)} disabled={ep <= 1} className="grid h-10 w-10 place-items-center rounded-full border border-white/10 bg-white/5 text-zinc-300 transition hover:bg-white/10 disabled:opacity-30 sm:h-9 sm:w-9">
+                <button onClick={() => goEp(ep - 1)} disabled={ep <= 1} className="grid h-9 w-9 place-items-center rounded-full border border-white/10 bg-white/5 text-zinc-300 transition hover:bg-white/10 disabled:opacity-30">
                   <Icon.ChevronLeft className="h-4 w-4" />
                 </button>
                 <button
@@ -363,7 +362,7 @@ export default function Watch() {
               </div>
             )}
 
-           <div className="grid max-h-[520px] grid-cols-4 gap-2 overflow-y-auto rounded-xl border border-white/10 bg-white/[0.03] p-3 sm:grid-cols-6 lg:grid-cols-5">
+            <div className="grid max-h-[520px] grid-cols-4 gap-2 overflow-y-auto rounded-xl border border-white/10 bg-white/[0.03] p-3 sm:grid-cols-6 lg:grid-cols-5">
               {episodesLoading
                 ? Array.from({ length: 20 }).map((_, i) => <Skeleton key={i} className="aspect-square" />)
                 : visibleEpisodes.map((n) => {

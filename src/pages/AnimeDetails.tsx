@@ -4,6 +4,8 @@ import { Link, useParams } from "react-router-dom";
 import { href } from "../utils/router";
 import {
   cleanDesc,
+  formatStatus,
+  getAiredEpisodeCount,
   getAnimeByMalId,
   getCharactersFor,
   getEpisodeThumbsBatch,
@@ -13,6 +15,7 @@ import {
   titleOf,
 } from "../lib/api";
 import { getAnimeBatch } from "../lib/api";
+import { toggleReleaseSubscription, useReleaseSubscribed } from "../lib/notifications";
 import { setReaction, toggleWatchlist, useAnimeStats, useReaction, useWatchedEpisodes, useWatchlist } from "../lib/store";
 import { useAsync } from "../lib/useAsync";
 import { AnimeCard, Badge, CardRow, CardSkeletons, Container, ErrorNote, formatCount, Icon, RowItem, Section, Skeleton } from "../components/ui";
@@ -21,9 +24,6 @@ import AuthModal from "../components/AuthModal";
 
 const EP_CHUNK_SIZE = 24;
 
-/** A single episode's clickable thumbnail card — shows a cover image
- * (Kitsu/TMDB), episode number badge, watched checkmark, and a play icon
- * on hover. Falls back to a generic film icon when no thumbnail exists. */
 function EpisodeCard({
   num,
   malId,
@@ -107,25 +107,38 @@ export default function AnimeDetails() {
     setEpRangeIndex(0);
   }, [id]);
 
-  // Computed before the loading/error early-returns (using optional
-  // chaining) so hook order stays stable across renders.
-  const episodeCount = anime?.episodes || 12;
+  const status = anime ? formatStatus(anime.status) : "";
+  const isUpcoming = status === "Upcoming";
+  const isAiring = status === "Airing";
+  const canSubscribe = isUpcoming || isAiring;
+
+  // For airing shows, MAL's `episodes` field is the season's eventual
+  // total (e.g. 13), not how many have actually aired — fetch the real
+  // aired-so-far count instead of trusting that number.
+  const { data: airedCount, loading: airedCountLoading } = useAsync(async () => {
+    if (!anime || !isAiring) return null;
+    return getAiredEpisodeCount(anime.malId);
+  }, [anime?.malId, isAiring]);
+
+  const resolvingEpisodeCount = isAiring && airedCountLoading;
+  const episodeCount = isAiring ? airedCount ?? 0 : anime?.episodes || 12;
   const episodeNumbers = Array.from({ length: Math.min(episodeCount, 5000) }, (_, i) => i + 1);
   const epChunkCount = Math.ceil(episodeNumbers.length / EP_CHUNK_SIZE);
   const epChunkStart = epRangeIndex * EP_CHUNK_SIZE;
   const visibleEpisodeNumbers = episodeNumbers.slice(epChunkStart, epChunkStart + EP_CHUNK_SIZE);
 
   const { data: episodeThumbs, loading: thumbsLoading } = useAsync(async () => {
-    if (!id || visibleEpisodeNumbers.length === 0) return {};
+    if (!id || isUpcoming || resolvingEpisodeCount || visibleEpisodeNumbers.length === 0) return {};
     return getEpisodeThumbsBatch(id, visibleEpisodeNumbers);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, epRangeIndex, episodeCount]);
+  }, [id, epRangeIndex, episodeCount, isUpcoming, resolvingEpisodeCount]);
 
   const watchlist = useWatchlist();
   const inList = watchlist.some((w) => w.animeId === id);
   const reaction = useReaction(id);
   const stats = useAnimeStats(id);
   const watchedEpisodes = useWatchedEpisodes(id);
+  const notifySubscribed = useReleaseSubscribed(id);
 
   async function handleToggleList() {
     if (!anime) return;
@@ -141,6 +154,11 @@ export default function AnimeDetails() {
     if (!anime) return;
     const result = await setReaction(anime.malId, type);
     if (result.requiresAuth) setShowAuth(true);
+  }
+
+  function handleToggleNotify() {
+    if (!anime) return;
+    toggleReleaseSubscription(anime);
   }
 
   if (loading) {
@@ -194,7 +212,7 @@ export default function AnimeDetails() {
               {anime.year && <Badge>{anime.year}</Badge>}
               {anime.type && <Badge>{anime.type}</Badge>}
               {anime.episodes && <Badge>{anime.episodes} episodes</Badge>}
-              {anime.status && <Badge>{anime.status}</Badge>}
+              {anime.status && <Badge>{formatStatus(anime.status)}</Badge>}
             </div>
             <h1 className="text-2xl font-black tracking-tight text-white sm:text-3xl lg:text-4xl">{titleOf(anime)}</h1>
             <div className="flex flex-wrap gap-2">
@@ -209,9 +227,27 @@ export default function AnimeDetails() {
           </div>
 
           <div className="flex flex-wrap items-center gap-3">
-            <Link to={href.watch(anime.malId, 1, "sub")} className="inline-flex h-11 items-center gap-2 rounded-full bg-red-600 px-6 text-sm font-semibold text-white shadow-lg shadow-red-900/40 transition hover:bg-red-500">
-              <Icon.Play className="h-4 w-4" /> Watch Episode 1
-            </Link>
+            {!isUpcoming && (
+              <Link to={href.watch(anime.malId, 1, "sub")} className="inline-flex h-11 items-center gap-2 rounded-full bg-red-600 px-6 text-sm font-semibold text-white shadow-lg shadow-red-900/40 transition hover:bg-red-500">
+                <Icon.Play className="h-4 w-4" /> Watch Episode 1
+              </Link>
+            )}
+
+            {canSubscribe && (
+              <button
+                onClick={handleToggleNotify}
+                className={cn(
+                  "inline-flex h-11 items-center gap-2 rounded-full border px-5 text-sm font-medium backdrop-blur transition",
+                  notifySubscribed
+                    ? "border-red-500/40 bg-red-600/15 text-red-300 hover:bg-red-600/25"
+                    : "border-white/15 bg-white/5 text-zinc-100 hover:bg-white/10",
+                )}
+              >
+                <Icon.Bell className="h-4 w-4" />
+                {notifySubscribed ? "Notifications On" : isUpcoming ? "Notify Me on Release" : "Notify Me on New Episodes"}
+              </button>
+            )}
+
             {trailer && (
               <button onClick={() => setShowTrailer(true)} className="inline-flex h-11 items-center gap-2 rounded-full border border-white/15 bg-white/5 px-5 text-sm font-medium text-zinc-100 backdrop-blur transition hover:bg-white/10">
                 <Icon.Film className="h-4 w-4" /> Trailer
@@ -266,42 +302,63 @@ export default function AnimeDetails() {
       </Container>
 
       <Container className="mt-10 space-y-12 sm:mt-14">
-        <Section title="Episodes">
-          {epChunkCount > 1 && (
-            <div className="mb-3 flex flex-wrap gap-1.5">
-              {Array.from({ length: epChunkCount }, (_, i) => {
-                const start = i * EP_CHUNK_SIZE + 1;
-                const end = Math.min((i + 1) * EP_CHUNK_SIZE, episodeNumbers.length);
-                const active = i === epRangeIndex;
-                return (
-                  <button
-                    key={i}
-                    onClick={() => setEpRangeIndex(i)}
-                    className={cn(
-                      "rounded-full border px-2.5 py-1 text-[11px] font-semibold transition",
-                      active ? "border-red-500 bg-red-600/20 text-red-300" : "border-white/10 bg-white/5 text-zinc-400 hover:text-white",
-                    )}
-                  >
-                    {start}-{end}
-                  </button>
-                );
-              })}
-            </div>
-          )}
+        {!isUpcoming && (
+          <Section title="Episodes">
+            {resolvingEpisodeCount ? (
+              <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
+                {Array.from({ length: 6 }).map((_, i) => (
+                  <Skeleton key={i} className="aspect-video w-full" />
+                ))}
+              </div>
+            ) : episodeCount === 0 ? (
+              <p className="text-sm text-zinc-500">No episodes have aired yet — check back soon.</p>
+            ) : (
+              <>
+                {epChunkCount > 1 && (
+                  <div className="mb-3 flex flex-wrap gap-1.5">
+                    {Array.from({ length: epChunkCount }, (_, i) => {
+                      const start = i * EP_CHUNK_SIZE + 1;
+                      const end = Math.min((i + 1) * EP_CHUNK_SIZE, episodeNumbers.length);
+                      const active = i === epRangeIndex;
+                      return (
+                        <button
+                          key={i}
+                          onClick={() => setEpRangeIndex(i)}
+                          className={cn(
+                            "rounded-full border px-2.5 py-1 text-[11px] font-semibold transition",
+                            active ? "border-red-500 bg-red-600/20 text-red-300" : "border-white/10 bg-white/5 text-zinc-400 hover:text-white",
+                          )}
+                        >
+                          {start}-{end}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
 
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
-            {visibleEpisodeNumbers.map((n) => (
-              <EpisodeCard
-                key={n}
-                num={n}
-                malId={anime.malId}
-                thumbnail={episodeThumbs?.[n]}
-                loading={thumbsLoading}
-                watched={watchedEpisodes.includes(n)}
-              />
-            ))}
+                <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6">
+                  {visibleEpisodeNumbers.map((n) => (
+                    <EpisodeCard
+                      key={n}
+                      num={n}
+                      malId={anime.malId}
+                      thumbnail={episodeThumbs?.[n]}
+                      loading={thumbsLoading}
+                      watched={watchedEpisodes.includes(n)}
+                    />
+                  ))}
+                </div>
+              </>
+            )}
+          </Section>
+        )}
+
+        {isUpcoming && (
+          <div className="flex items-start gap-2 rounded-lg border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-zinc-400">
+            <Icon.Clock className="mt-0.5 h-4 w-4 shrink-0 text-zinc-500" />
+            <span>This anime hasn't released yet. Turn on notifications above and we'll let you know the moment it's out.</span>
           </div>
-        </Section>
+        )}
 
         {extras.loading ? (
           <CardSkeletons row n={8} />

@@ -4,7 +4,6 @@ import { cn } from "../utils/cn";
 import { href } from "../utils/router";
 import {
   getAnimeBatch,
-  getCurrentSeason,
   getRecommendationsFor,
   getTopBanners,
   cleanDesc,
@@ -40,10 +39,6 @@ function Hero({ items }: { items: Anime[] }) {
 
   return (
     <div
-      // Was h-[78vh] min-h-[520px] unconditionally — on a typical phone
-      // that ate almost the entire visible screen on load before any
-      // other content appeared. Now scales up progressively with screen
-      // size instead of being desktop-sized everywhere.
       className="relative h-[58vh] min-h-[420px] w-full overflow-hidden sm:h-[68vh] sm:min-h-[480px] lg:h-[78vh] lg:min-h-[520px]"
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
@@ -245,7 +240,6 @@ export default function Home() {
         <ContinueWatching />
         <Recommended />
         <AnimeRow title="Trending now" ids={TRENDING_IDS} />
-        <AnimeRow title="New this season" loader={getCurrentSeason} />
         <AnimeRow title="All-time popular" ids={ALL_TIME_POPULAR_IDS} />
         <AnimeRow title="Action picks" ids={ACTION_IDS} />
         <AnimeRow title="Fantasy & isekai" ids={FANTASY_ISEKAI_IDS} />
