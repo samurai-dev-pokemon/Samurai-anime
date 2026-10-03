@@ -9,7 +9,7 @@
 
   <br />
 
-  ![Status](https://img.shields.io/badge/status-1.0%20release-brightgreen?style=for-the-badge)
+  ![Status](https://img.shields.io/badge/status-1.1%20release-brightgreen?style=for-the-badge)
   ![Made with React](https://img.shields.io/badge/made%20with-React-61DAFB?style=for-the-badge&logo=react&logoColor=black)
   ![TypeScript](https://img.shields.io/badge/TypeScript-3178C6?style=for-the-badge&logo=typescript&logoColor=white)
   ![TailwindCSS](https://img.shields.io/badge/Tailwind-06B6D4?style=for-the-badge&logo=tailwindcss&logoColor=white)
@@ -19,9 +19,10 @@
 <br />
 
 > [!NOTE]
-> **Samurai Anime 1.0 is here!** Accounts, profiles, and everything from beta
-> is now stable and ready to use. See the [what's next](#-whats-next) section
-> below for what's coming after 1.0.
+> **Samurai Anime 1.1 is here!** Building on the stable 1.0 foundation, this
+> update brings episode notifications, skip intro/outro, episode cover art,
+> and a much better mobile & touch experience. See the
+> [what's next](#-whats-next) section below for what's coming after 1.1.
 
 ---
 
@@ -42,6 +43,12 @@ and suggest what to watch next.
 - 🔍 **Fast, clean search** — find any title instantly, with unsafe content automatically filtered out
 - 📺 **Full anime pages** — synopsis, genres, studios, trailers, full cast & voice actors, and legal streaming platform links
 - ▶️ **Custom video player** — adaptive HLS playback, sub/dub toggle, multi-server switching, volume/fullscreen controls, and a "next episode" button
+- ⏭️ **Skip intro/outro** — auto-detected skip buttons so you can jump straight to the action
+- 📱 **Enhanced touch controls** — gesture-friendly video player with full mobile fullscreen support
+- 🔔 **Episode notifications** — subscribe to a show and get notified the moment a new episode drops
+- 🖼️ **Episode cover art** — browse episodes with real thumbnails instead of generic placeholders
+- 💬 **Subtitle customization** — toggle subtitles on/off and scale their size to your preference
+- 🔁 **Smart dub fallback** — automatically falls back to sub if a dub isn't available for an episode
 - ⏱ **Continue Watching** — your progress is saved automatically per episode so you always pick up where you left off
 - 🤖 **Personalized recommendations** — suggestions generated from your own watch history, not generic top-10 lists
 - 📋 **My List** — save any anime to a personal watchlist for later
@@ -67,8 +74,7 @@ and suggest what to watch next.
 
 ## 🔮 What's Next
 
-Samurai Anime doesn't stop at 1.0. Here's what's on the horizon:
-
+Samurai Anime doesn't stop at 1.1. Here's what's on the horizon:
 
 - [ ] ⭐ It is mystery, who knows (mostly bug fixes lol)
 
