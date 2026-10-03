@@ -9,6 +9,7 @@ import AnimeDetails from "./pages/AnimeDetails";
 import Watch from "./pages/Watch";
 import Genre from "./pages/Genre";
 import MyList from "./pages/MyList";
+import Airing from "./pages/Airing";
 import NotFound from "./pages/NotFound";
 
 export default function App() {
@@ -26,6 +27,7 @@ export default function App() {
             <Route path="/watch/:malId" element={<Watch />} />
             <Route path="/genre/:name" element={<Genre />} />
             <Route path="/my-list" element={<MyList />} />
+            <Route path="/airing" element={<Airing />} />
             <Route path="*" element={<NotFound />} />
           </Routes>
         </main>

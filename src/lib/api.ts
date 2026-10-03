@@ -57,9 +57,6 @@ function normalizeCombined(malId: number, raw: any): Anime {
     banner: d.banner || null,
     logo: d.logo || null,
     genres: d.genres || [],
-    // MAL's native score is 0–10 (e.g. 8.75); normalize to the same 0–100
-    // scale AniList uses so Anime.score is consistent everywhere, and
-    // AnimeCard's `(score / 10).toFixed(1)` display math works app-wide.
     score: d.score != null ? d.score * 10 : null,
     episodes: d.episodes ?? null,
     year: d.year ?? seasonToYear(d.premiered) ?? null,
@@ -271,8 +268,6 @@ export async function resolveWatch(opts: {
       console.warn("[watch] api error", url, body);
       return null;
     }
-    // 206 = "dub not available, returned sub instead" — surface this to the UI
-    // instead of silently pretending the requested audio was honored.
     return { ...body, partial: res.status === 206 } as WatchResult;
   } catch (e) {
     console.warn("[watch] network error", url, e);
@@ -280,13 +275,6 @@ export async function resolveWatch(opts: {
   }
 }
 
-/**
- * Tries to find a playable, ad-free (hls/mp4) stream that actually matches
- * the requested audio. Prefers an exact match; if only a "partial" (audio
- * fallback) result is found anywhere, it's kept as a last resort so the
- * page still plays something, but the caller can tell the difference via
- * `.partial` and show a heads-up to the user instead of a silent swap.
- */
 export async function findBestStream(opts: {
   malId: number;
   ep: number;
@@ -325,6 +313,30 @@ export function titleOf(a: Anime): string {
   return a.titleEnglish || a.title;
 }
 
+/**
+ * Normalizes inconsistent status phrasing from different upstream sources
+ * into one clean label. This backend can return either AniList's
+ * enum-style statuses (FINISHED, RELEASING, NOT_YET_RELEASED, CANCELLED,
+ * HIATUS) or MAL/Jikan's phrasing ("Currently Airing", "Finished Airing",
+ * "Not yet aired") depending on which source filled in the data — this
+ * handles both so the UI never shows raw backend text.
+ */
+export function formatStatus(status?: string | null): string {
+  if (!status) return "";
+  const s = status.trim().toLowerCase().replace(/[_\s]+/g, " ");
+
+  // Order matters: "Finished Airing" contains the substring "airing", so
+  // the finish/complete check must run before the airing check, or every
+  // finished show would get misread as still airing.
+  if (s.includes("not") && (s.includes("yet") || s.includes("released") || s.includes("aired"))) return "Upcoming";
+  if (s.includes("cancel")) return "Cancelled";
+  if (s.includes("hiatus")) return "Hiatus";
+  if (s.includes("finish") || s.includes("complete")) return "Finished";
+  if (s.includes("releasing") || s.includes("airing") || s.includes("ongoing")) return "Airing";
+
+  return status;
+}
+
 export function cleanDesc(desc?: string | null): string {
   if (!desc) return "";
   return desc
@@ -333,63 +345,87 @@ export function cleanDesc(desc?: string | null): string {
     .replace(/\s+/g, " ")
     .trim();
 }
+
 /* ---------------- episode count (handles open-ended/airing shows) ---------------- */
+
+const episodeCountCache = new Map<number, { count: number; ts: number }>();
+const EPISODE_COUNT_TTL = 5 * 60 * 1000;
+const airedCountCache = new Map<number, { count: number; ts: number }>();
+const AIRED_COUNT_TTL = 2 * 60 * 1000; // shorter TTL — this needs to catch newly-aired episodes promptly
 
 /**
- * Resolves the real episode count for the Watch page's episode grid.
- *
- * MAL's `episodes` field is reliable for finished shows (and even most
- * currently-airing seasonal shows with a known cour length), but it's
- * `null` for open-ended long-runners like One Piece while they're still
- * airing — so we can't just trust `anime.episodes` blindly. When it's
- * missing, this asks the episodes endpoint directly for how many
- * episodes actually exist, which reflects newly released episodes the
- * next time someone loads the page (rather than being stuck at whatever
- * number was true when the anime was first indexed).
- * i am so smart right Odaino if your seeing this i am not attacking you  
+ * Walks the episodes-list endpoint to count how many episodes actually
+ * exist there — used both for open-ended long-runners (where MAL's
+ * `episodes` field is null) and for currently-airing shows (where we
+ * deliberately ignore MAL's `episodes` total, since it reflects the
+ * season's eventual planned length, not how many have aired so far).
  */
-/* ---------------- episode count (handles open-ended/airing shows) ---------------- */
-const episodeCountCache = new Map<number, { count: number; ts: number }>();
-const EPISODE_COUNT_TTL = 5 * 60 * 1000; // 5 min — fresh enough to catch new eps, cheap enough to not spam the API
+async function fetchEpisodeListCount(malId: number): Promise<number | null> {
+  try {
+    const first = await getJSON<any>(`${API_BASE}/mal/anime/${malId}/episodes?page=1`);
+    const pageSize = first?.data?.length || 0;
+    if (pageSize === 0) return null;
 
+    const explicitTotal =
+      first?.pagination?.items?.total ?? first?.pagination?.total ?? first?.total ?? first?.count ?? null;
 
+    if (typeof explicitTotal === "number" && explicitTotal > 0) {
+      return explicitTotal;
+    }
+
+    let count = pageSize;
+    let page = 1;
+    let lastPageLen = pageSize;
+    while (lastPageLen === pageSize && page < 30) {
+      page++;
+      const next = await getJSON<any>(`${API_BASE}/mal/anime/${malId}/episodes?page=${page}`);
+      lastPageLen = next?.data?.length || 0;
+      count += lastPageLen;
+    }
+    return count;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resolves the episode count to use for navigation/grids on finished or
+ * not-yet-confirmed-airing shows. Trusts MAL's known total when present
+ * (reliable once a show is finished), falling back to counting the
+ * episode list directly for open-ended airing long-runners where MAL
+ * doesn't set a total at all.
+ */
 export async function getEpisodeCount(malId: number, knownEpisodes?: number | null): Promise<number | null> {
   if (knownEpisodes) return knownEpisodes;
 
   const cached = episodeCountCache.get(malId);
   if (cached && Date.now() - cached.ts < EPISODE_COUNT_TTL) return cached.count;
 
-  try {
-    const first = await getJSON<any>(`${API_BASE}/mal/anime/${malId}/episodes?page=1`);
-    const pageSize = first?.data?.length || 0;
-    if (pageSize === 0) return cached?.count ?? knownEpisodes ?? null;
+  const count = await fetchEpisodeListCount(malId);
+  if (count == null) return cached?.count ?? knownEpisodes ?? null;
 
-    // Some APIs do expose a reliable total — use it directly if present.
-    const explicitTotal =
-      first?.pagination?.items?.total ?? first?.pagination?.total ?? first?.total ?? first?.count ?? null;
-
-    let count: number;
-    if (typeof explicitTotal === "number" && explicitTotal > 0) {
-      count = explicitTotal;
-    } else {
-      count = pageSize;
-      let page = 1;
-      let lastPageLen = pageSize;
-      // Cap at 30 pages (~3000 eps at 100/page) so a broken response can't loop forever.
-      while (lastPageLen === pageSize && page < 30) {
-        page++;
-        const next = await getJSON<any>(`${API_BASE}/mal/anime/${malId}/episodes?page=${page}`);
-        lastPageLen = next?.data?.length || 0;
-        count += lastPageLen;
-      }
-    }
-
-    episodeCountCache.set(malId, { count, ts: Date.now() });
-    return count;
-  } catch {
-    return cached?.count ?? knownEpisodes ?? null;
-  }
+  episodeCountCache.set(malId, { count, ts: Date.now() });
+  return count;
 }
+
+/**
+ * Returns how many episodes have actually been released so far,
+ * deliberately ignoring MAL's "total planned episodes" field. Use this
+ * instead of getEpisodeCount() for any show currently in "Airing" status
+ * — MAL sets the eventual total (e.g. 13) the moment a season is
+ * confirmed, long before all of them have actually aired.
+ */
+export async function getAiredEpisodeCount(malId: number): Promise<number | null> {
+  const cached = airedCountCache.get(malId);
+  if (cached && Date.now() - cached.ts < AIRED_COUNT_TTL) return cached.count;
+
+  const count = await fetchEpisodeListCount(malId);
+  if (count == null) return cached?.count ?? null;
+
+  airedCountCache.set(malId, { count, ts: Date.now() });
+  return count;
+}
+
 /* ---------------- aniskip (intro/outro skip times) ---------------- */
 
 const ANISKIP_BASE = "https://api.aniskip.com";
@@ -418,11 +454,6 @@ export interface SkipSegments {
   outro: { start: number; end: number } | null;
 }
 
-/**
- * Pulls opening/ending skip times from Aniskip using the anime's MAL id.
- * Used as a fallback/enhancement when the scraper's own `intro`/`outro`
- * fields on WatchResult are missing for a given episode.
- */
 export async function getSkipTimes(malId: number, episodeNumber: number): Promise<SkipSegments> {
   const empty: SkipSegments = { intro: null, outro: null };
   if (!malId || !episodeNumber) return empty;
@@ -431,7 +462,7 @@ export async function getSkipTimes(malId: number, episodeNumber: number): Promis
     const params = new URLSearchParams();
     params.append("types", "op");
     params.append("types", "ed");
-    params.append("episodeLength", "0"); // 0 = don't filter by length
+    params.append("episodeLength", "0");
 
     const res = await fetch(`${ANISKIP_BASE}/v2/skip-times/${malId}/${episodeNumber}?${params.toString()}`);
     if (!res.ok) return empty;
@@ -450,6 +481,7 @@ export async function getSkipTimes(malId: number, episodeNumber: number): Promis
     return empty;
   }
 }
+
 /* ---------------- episode thumbnails (kitsu/tmdb) ---------------- */
 
 const episodeThumbCache = new Map<string, string | null>();
@@ -468,12 +500,6 @@ async function fetchEpisodeThumbFrom(
   }
 }
 
-/**
- * Resolves a single episode's cover thumbnail. Tries Kitsu first (usually
- * has better per-episode coverage), falls back to TMDB if Kitsu has
- * nothing for that episode. Result is cached forever per (malId, ep) pair
- * since these don't change.
- */
 export async function getEpisodeThumb(malId: number, ep: number): Promise<string | null> {
   const key = `${malId}-${ep}`;
   if (episodeThumbCache.has(key)) return episodeThumbCache.get(key)!;
@@ -490,11 +516,6 @@ export async function getEpisodeThumb(malId: number, ep: number): Promise<string
   return p;
 }
 
-/**
- * Fetches thumbnails for a batch of episode numbers with bounded
- * concurrency, so loading a 24-episode page doesn't fire 24 simultaneous
- * requests at once.
- */
 export async function getEpisodeThumbsBatch(
   malId: number,
   episodeNumbers: number[],
