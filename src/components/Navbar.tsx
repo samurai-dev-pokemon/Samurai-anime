@@ -140,7 +140,7 @@ export default function Navbar() {
             </button>
 
             <div className="min-w-0 shrink">
-              <Logo />
+              <Logo shortOnMobile />
             </div>
 
             <nav className="ml-4 hidden items-center gap-6 text-sm font-medium text-zinc-300 lg:flex">
@@ -273,7 +273,7 @@ export default function Navbar() {
                   <button onClick={() => setAuthMode("signin")} className="hidden rounded-full px-4 py-1.5 text-sm font-semibold text-zinc-200 transition hover:text-white sm:block">
                     Sign In
                   </button>
-                  <button onClick={() => setAuthMode("signup")} className="whitespace-nowrap rounded-full bg-red-600 px-4 py-1.5 text-sm font-semibold text-white shadow shadow-red-900/40 transition hover:bg-red-500">
+                  <button onClick={() => setAuthMode("signup")} className="whitespace-nowrap rounded-full bg-red-600 px-3 py-1.5 text-sm font-semibold text-white shadow shadow-red-900/40 transition hover:bg-red-500 sm:px-4">
                     Sign Up
                   </button>
                 </div>
