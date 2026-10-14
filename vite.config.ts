@@ -16,4 +16,8 @@ export default defineConfig({
       "@": path.resolve(__dirname, "src"),
     },
   },
+  server: {
+    // Allow the sandbox preview proxy host to reach the dev server.
+    allowedHosts: true,
+  },
 });
