@@ -55,7 +55,7 @@ function Hero({ items }: { items: Anime[] }) {
       <div className="absolute inset-0 bg-gradient-to-r from-zinc-950 via-zinc-950/60 to-zinc-950/10" />
       <div className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-transparent to-zinc-950/50" />
 
-      <Container className="relative flex h-full flex-col justify-end pb-8 sm:pb-12 lg:pb-16">
+      <Container className="relative flex h-full flex-col justify-start pb-8 pt-20 sm:justify-end sm:pb-12 sm:pt-0 lg:pb-16">
         <div className="max-w-2xl space-y-3 sm:space-y-4">
           <div className="flex flex-wrap items-center gap-2">
             <Badge className="border-red-500/40 bg-red-500/10 text-red-300">Featured</Badge>

@@ -1,7 +1,7 @@
 // Hand-picked, well-known, safe-for-work MAL IDs used to seed the home page
 // rows before live season/search data is blended in. Keeping this curated
 // avoids ecchi/hentai titles ever surfacing on the landing experience.
-export const HERO_IDS = [16498, 1535, 5114, 38524, 40748, 21, 11061, 20958];
+export const HERO_IDS = [16498, 1535, 40748, 21, 11061, 20958];
 
 export const TRENDING_IDS = [
   44511, 40748, 38524, 21, 16498, 30276, 31964, 1535, 5114, 11061, 20958,
