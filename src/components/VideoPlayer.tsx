@@ -41,6 +41,7 @@ export default function VideoPlayer({
   const wrapRef = useRef<HTMLDivElement>(null);
   const hlsRef = useRef<Hls | null>(null);
   const skipFlashTimer = useRef<number | null>(null);
+  const stallTimer = useRef<number | null>(null);
   const videoId = useId().replace(/:/g, "");
   const [playing, setPlaying] = useState(false);
   const [ready, setReady] = useState(false);
@@ -85,6 +86,13 @@ export default function VideoPlayer({
       if (Hls.isSupported()) {
         const hls = new Hls({
           maxBufferLength: 30,
+          maxMaxBufferLength: 60,
+          maxBufferHole: 0.5,
+          // Unbounded back buffer (hls.js default) lets memory grow for the
+          // whole session, which on long episodes/low-end devices causes
+          // periodic GC pauses that look exactly like "stutters every few
+          // seconds". Capping it keeps memory flat for the whole watch.
+          backBufferLength: 90,
           enableWorker: true,
           manifestLoadingMaxRetry: 4,
           manifestLoadingRetryDelay: 1000,
@@ -92,6 +100,8 @@ export default function VideoPlayer({
           levelLoadingRetryDelay: 1000,
           fragLoadingMaxRetry: 6,
           fragLoadingRetryDelay: 1000,
+          nudgeMaxRetry: 5,
+          nudgeOffset: 0.1,
         });
         hlsRef.current = hls;
         hls.loadSource(src);
@@ -143,9 +153,29 @@ export default function VideoPlayer({
     const onLoaded = () => setDuration(video.duration || 0);
     const onPlay = () => setPlaying(true);
     const onPause = () => setPlaying(false);
-    const onWaiting = () => setBuffering(true);
-    const onPlaying = () => setBuffering(false);
+
+    // Stall watchdog: if playback reports "waiting" and doesn't recover on
+    // its own within ~1.5s, nudge the playhead forward a hair. This is the
+    // standard fix for hls.js getting stuck on a tiny buffer gap — the
+    // browser's decoder just needs a kick past it instead of a full reload,
+    // which is what was causing the periodic freeze-then-restart.
+    const onWaiting = () => {
+      setBuffering(true);
+      if (stallTimer.current) window.clearTimeout(stallTimer.current);
+      stallTimer.current = window.setTimeout(() => {
+        const v = videoRef.current;
+        if (v && !v.paused) v.currentTime += 0.1;
+      }, 1500);
+    };
+    const onPlaying = () => {
+      setBuffering(false);
+      if (stallTimer.current) {
+        window.clearTimeout(stallTimer.current);
+        stallTimer.current = null;
+      }
+    };
     const onEnd = () => onEnded?.();
+
     video.addEventListener("timeupdate", onTime);
     video.addEventListener("loadedmetadata", onLoaded);
     video.addEventListener("play", onPlay);
@@ -161,6 +191,7 @@ export default function VideoPlayer({
       video.removeEventListener("waiting", onWaiting);
       video.removeEventListener("playing", onPlaying);
       video.removeEventListener("ended", onEnd);
+      if (stallTimer.current) window.clearTimeout(stallTimer.current);
     };
   }, [onProgress, onEnded]);
 
@@ -360,8 +391,8 @@ export default function VideoPlayer({
     return (
       <div className="relative aspect-video w-full overflow-hidden rounded-xl bg-black ring-1 ring-white/10">
         <iframe src={stream!.embedUrl} allowFullScreen className="h-full w-full" title={title || "Player"} referrerPolicy="no-referrer" />
-        <div className="absolute left-3 top-3 rounded-md bg-black/70 px-2.5 py-1 text-[11px] text-amber-300 backdrop-blur">
-          Embedded server — some ads may appear
+        <div className="absolute left-3 top-3 rounded-md bg-black/70 px-2.5 py-1 text-[11px] text-zinc-300 backdrop-blur">
+          Embedded server
         </div>
       </div>
     );
@@ -397,8 +428,12 @@ export default function VideoPlayer({
         className="h-full w-full"
         onClick={handleVideoTap as any}
         onTouchEnd={isTouchDevice ? (handleVideoTap as any) : undefined}
+        onContextMenu={(e) => e.preventDefault()}
         playsInline
         crossOrigin="anonymous"
+        disablePictureInPicture
+        disableRemotePlayback
+        controlsList="nodownload nofullscreen noremoteplayback noplaybackrate"
       >
         {stream?.subtitles?.map((s) => (
           <track key={s.url} src={s.url} kind="subtitles" srcLang="en" label={s.lang} default={s.default} />
@@ -501,9 +536,6 @@ export default function VideoPlayer({
           />
         </div>
 
-        {/* Single row, split into a left "transport" cluster and a right
-            "everything else" cluster via one ml-auto — no wrapping, no
-            reordering hacks. Sized so it fits down to ~320px screens. */}
         <div className="flex flex-nowrap items-center gap-1 text-white sm:gap-3">
           <button onClick={() => seekBy(-10)} aria-label="Rewind 10 seconds" className="grid h-9 w-9 shrink-0 place-items-center text-zinc-300 transition hover:text-white sm:h-auto sm:w-auto">
             <Icon.Rewind10 className="h-5 w-5" />
@@ -517,9 +549,6 @@ export default function VideoPlayer({
             <Icon.Forward10 className="h-5 w-5" />
           </button>
 
-          {/* Next-episode arrow hidden on mobile — Watch.tsx already has
-              dedicated prev/next buttons below the player, so this was
-              just an extra button crowding an already-tight row. */}
           {hasNext && (
             <button onClick={onNext} aria-label="Next episode" className="hidden shrink-0 text-zinc-300 hover:text-white sm:grid sm:h-auto sm:w-auto sm:place-items-center">
               <svg viewBox="0 0 24 24" fill="currentColor" className="h-[18px] w-[18px]"><path d="M6 4l10 8-10 8V4zM18 4h2v16h-2z" /></svg>
@@ -527,10 +556,6 @@ export default function VideoPlayer({
           )}
 
           <div className="ml-auto flex items-center gap-1 sm:gap-3">
-            {/* Volume — now a popover anchored above the button instead of
-                an inline-growing slider, so opening it never changes the
-                row's width or causes a wrap. Hover opens it on desktop,
-                tap toggles it on touch. */}
             <div
               ref={volumeWrapRef}
               className="relative"
@@ -564,10 +589,6 @@ export default function VideoPlayer({
 
             {hasSubtitles && (
               <div className="flex items-center gap-0.5">
-                {/* Subtitle size +/- hidden on mobile — captions toggle
-                    alone is kept since that's the control people actually
-                    need in a hurry; resizing is a nice-to-have that was
-                    eating row space on small screens. */}
                 <button
                   onClick={() => bumpSubtitleScale(-SUB_SCALE_STEP)}
                   disabled={!subtitlesEnabled}
@@ -601,7 +622,7 @@ export default function VideoPlayer({
             {title && <span className="hidden max-w-[240px] truncate text-xs text-zinc-400 sm:block">{title}</span>}
 
             <span className="hidden items-center gap-1 rounded-full bg-white/10 px-2 py-0.5 text-[10px] font-semibold text-zinc-300 lg:flex">
-              <Icon.Shield className="h-3 w-3 text-green-400" /> Ad-free stream
+              <Icon.Shield className="h-3 w-3 text-red-400" /> Ad-free stream
             </span>
 
             <button onClick={toggleFullscreen} aria-label="Fullscreen" className={cn("grid h-9 w-9 shrink-0 place-items-center sm:h-auto sm:w-auto", fullscreen && "text-red-400")}>

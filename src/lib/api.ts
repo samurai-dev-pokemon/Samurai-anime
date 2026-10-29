@@ -8,7 +8,8 @@ import type {
   WatchResult,
 } from "./types";
 
-export const API_BASE = "https://anivault-scraper-fawn.vercel.app/api";
+export const API_BASE =
+  import.meta.env.VITE_API_BASE || "https://anivault-scraper-test.vercel.app/api";
 
 /** Genres/keywords that must never appear on this site. */
 const BLOCKED_GENRES = new Set([
@@ -243,11 +244,11 @@ export async function resolveWatch(opts: {
   malId: number;
   ep: number;
   type: "sub" | "dub";
-  source?: "anikoto" | "desidub" | "animeheaven";
+  source?: "megaplay" | "anikoto" | "desidub" | "animeheaven";
   server?: string;
   strict?: boolean;
 }): Promise<WatchResult | null> {
-  const { malId, ep, type, source = "anikoto", server, strict } = opts;
+  const { malId, ep, type, source = "megaplay", server, strict } = opts;
 
   const idPart = `mal-${malId}`;
   const query = new URLSearchParams();
@@ -280,7 +281,7 @@ export async function findBestStream(opts: {
   ep: number;
   type: "sub" | "dub";
 }): Promise<WatchResult | null> {
-  const sources: Array<"anikoto" | "desidub"> = ["anikoto", "desidub"];
+  const sources: Array<"megaplay" | "anikoto" | "desidub"> = ["megaplay", "anikoto", "desidub"];
   let bestFallback: WatchResult | null = null;
   let lastResult: WatchResult | null = null;
 
@@ -532,4 +533,33 @@ export async function getEpisodeThumbsBatch(
   }
   await Promise.all(Array.from({ length: Math.min(concurrency, episodeNumbers.length) }, worker));
   return result;
+}
+
+/* ---------------- anilist id resolution ---------------- */
+
+const anilistIdCache = new Map<number, number | null>();
+const anilistIdInflight = new Map<number, Promise<number | null>>();
+
+export async function getAnilistId(malId: number): Promise<number | null> {
+  if (anilistIdCache.has(malId)) return anilistIdCache.get(malId)!;
+  if (anilistIdInflight.has(malId)) return anilistIdInflight.get(malId)!;
+
+  const p = (async () => {
+    try {
+      const raw = await getJSON<{ malId: number; anilistId: number | null }>(
+        `${API_BASE}/anilist/id?malId=${malId}`,
+      );
+      const anilistId = raw?.anilistId ?? null;
+      anilistIdCache.set(malId, anilistId);
+      return anilistId;
+    } catch {
+      anilistIdCache.set(malId, null);
+      return null;
+    } finally {
+      anilistIdInflight.delete(malId);
+    }
+  })();
+
+  anilistIdInflight.set(malId, p);
+  return p;
 }

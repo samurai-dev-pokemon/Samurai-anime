@@ -31,8 +31,8 @@ import type {
 
 /* Local cache + pub/sub layer so React components can subscribe
    synchronously, while the cache itself is kept live by Firestore
-   listeners (for watchlist/progress/reactions/watched) or Firebase Auth
-   (for the user). */
+   listeners (for watchlist/progress/reactions/watched/preferences) or
+   Firebase Auth (for the user). */
 
 const PROGRESS_KEY = "samurai.progress.v1";
 const WATCHLIST_KEY = "samurai.watchlist.v1";
@@ -99,15 +99,17 @@ export async function signOutUser() {
   write<ProgressEntry[]>(PROGRESS_KEY, []);
   write<ReactionEntry[]>(REACTIONS_KEY, []);
   write<WatchedEntry[]>(WATCHED_KEY, []);
+  write<UserPreferences>(PREFERENCES_KEY, DEFAULT_PREFERENCES);
 }
 
-/* ---------------- Firestore-synced watchlist + progress + reactions + watched ----------------
-   Local cache mirrors four private Firestore collections:
+/* ---------------- Firestore-synced watchlist + progress + reactions + watched + preferences ----------------
+   Local cache mirrors five private Firestore locations:
      users/{uid}/watchlist/{animeId}
      users/{uid}/progress/{animeId}
      users/{uid}/reactions/{animeId}
      users/{uid}/watched/{animeId}
-   A live listener keeps the cache (and therefore hooks) fresh. All four are
+     users/{uid}/meta/preferences
+   A live listener keeps the cache (and therefore hooks) fresh. All five are
    signed-in-only: no user, no data, and writes are rejected client-side.
    There's also a *public* animeStats/{animeId} doc and animeComments
    collection (see below) that anyone can read regardless of sign-in. */
@@ -116,6 +118,7 @@ let unsubWatchlist: (() => void) | null = null;
 let unsubProgress: (() => void) | null = null;
 let unsubReactions: (() => void) | null = null;
 let unsubWatched: (() => void) | null = null;
+let unsubPreferences: (() => void) | null = null;
 
 // Tracks whether the initial cloud fetch of progress has completed for the
 // current session — lets Watch.tsx wait for real resume data instead of
@@ -150,6 +153,7 @@ function attachUserListeners(uid: string) {
   unsubProgress?.();
   unsubReactions?.();
   unsubWatched?.();
+  unsubPreferences?.();
 
   markProgressLoaded(false);
   // Safety net: if Firestore is slow/offline, don't leave the Watch page
@@ -185,6 +189,11 @@ function attachUserListeners(uid: string) {
       snap.docs.map((d) => d.data() as WatchedEntry),
     );
   });
+
+  unsubPreferences = onSnapshot(doc(db, "users", uid, "meta", "preferences"), (snap) => {
+    const data = snap.data() as Partial<UserPreferences> | undefined;
+    write<UserPreferences>(PREFERENCES_KEY, { ...DEFAULT_PREFERENCES, ...data });
+  });
 }
 
 function detachUserListeners() {
@@ -192,22 +201,25 @@ function detachUserListeners() {
   unsubProgress?.();
   unsubReactions?.();
   unsubWatched?.();
+  unsubPreferences?.();
   unsubWatchlist = null;
   unsubProgress = null;
   unsubReactions = null;
   unsubWatched = null;
+  unsubPreferences = null;
   write<WatchlistEntry[]>(WATCHLIST_KEY, []);
   write<ProgressEntry[]>(PROGRESS_KEY, []);
   write<ReactionEntry[]>(REACTIONS_KEY, []);
   write<WatchedEntry[]>(WATCHED_KEY, []);
+  write<UserPreferences>(PREFERENCES_KEY, DEFAULT_PREFERENCES);
   // Signed out = nothing to load from the cloud, so resolve immediately
   // rather than leaving any waiting UI stuck.
   markProgressLoaded(true);
 }
 
-/* Keep the cached user + list/progress/reaction/watched data in sync with
-   real Firebase session state — runs once on startup and again on every
-   future sign-in/out, so refreshing the page doesn't log the user out. */
+/* Keep the cached user + list/progress/reaction/watched/preferences data in
+   sync with real Firebase session state — runs once on startup and again on
+   every future sign-in/out, so refreshing the page doesn't log the user out. */
 onAuthStateChanged(auth, (fbUser) => {
   if (fbUser) {
     write<AuthUser | null>(AUTH_KEY, {
@@ -527,23 +539,6 @@ export async function toggleCommentLike(
   });
   return { requiresAuth: false };
 }
-const DUB_FALLBACK_KEY = "samurai.dubFallback.v1";
-
-// ---------------- dub fallback ---------------- 
-
-export function getDubFallbackEnabled(): boolean {
-  return read<boolean>(DUB_FALLBACK_KEY, true);
-}
-
-export function setDubFallbackEnabled(enabled: boolean) {
-  write(DUB_FALLBACK_KEY, enabled);
-}
-
-export function useDubFallbackEnabled(): boolean {
-  const [state, setState] = useState<boolean>(() => getDubFallbackEnabled());
-  useEffect(() => subscribe(DUB_FALLBACK_KEY, () => setState(getDubFallbackEnabled())), []);
-  return state;
-}
 
 /** Same as above, for a reply. */
 export async function toggleReplyLike(
@@ -560,4 +555,68 @@ export async function toggleReplyLike(
     likedBy: liked ? arrayRemove(uid) : arrayUnion(uid),
   });
   return { requiresAuth: false };
+}
+
+/* ---------------- dub fallback (local-only, per device) ---------------- */
+const DUB_FALLBACK_KEY = "samurai.dubFallback.v1";
+
+export function getDubFallbackEnabled(): boolean {
+  return read<boolean>(DUB_FALLBACK_KEY, true);
+}
+
+export function setDubFallbackEnabled(enabled: boolean) {
+  write(DUB_FALLBACK_KEY, enabled);
+}
+
+export function useDubFallbackEnabled(): boolean {
+  const [state, setState] = useState<boolean>(() => getDubFallbackEnabled());
+  useEffect(() => subscribe(DUB_FALLBACK_KEY, () => setState(getDubFallbackEnabled())), []);
+  return state;
+}
+
+/* ---------------- account preferences (sub/dub default + autoplay, synced) ----------------
+   Unlike dub fallback above (a local safety behavior), these are treated as
+   account-level settings and synced via users/{uid}/meta/preferences so they
+   follow the signed-in user across devices. Defaults apply immediately for
+   signed-out users or before the first snapshot arrives. */
+const PREFERENCES_KEY = "samurai.preferences.v1";
+
+interface UserPreferences {
+  preferredAudio: "sub" | "dub";
+  autoplayNext: boolean;
+}
+
+const DEFAULT_PREFERENCES: UserPreferences = {
+  preferredAudio: "sub",
+  autoplayNext: true,
+};
+
+function getPreferences(): UserPreferences {
+  return read<UserPreferences>(PREFERENCES_KEY, DEFAULT_PREFERENCES);
+}
+
+export function usePreferredAudio(): "sub" | "dub" {
+  const [state, setState] = useState<"sub" | "dub">(() => getPreferences().preferredAudio);
+  useEffect(() => subscribe(PREFERENCES_KEY, () => setState(getPreferences().preferredAudio)), []);
+  return state;
+}
+
+export function useAutoplayNext(): boolean {
+  const [state, setState] = useState<boolean>(() => getPreferences().autoplayNext);
+  useEffect(() => subscribe(PREFERENCES_KEY, () => setState(getPreferences().autoplayNext)), []);
+  return state;
+}
+
+/** Updates the signed-in user's preferred audio. No-ops if signed out. */
+export async function setPreferredAudio(value: "sub" | "dub") {
+  const uid = auth.currentUser?.uid;
+  if (!uid) return;
+  await setDoc(doc(db, "users", uid, "meta", "preferences"), { preferredAudio: value }, { merge: true });
+}
+
+/** Updates the signed-in user's autoplay setting. No-ops if signed out. */
+export async function setAutoplayNext(value: boolean) {
+  const uid = auth.currentUser?.uid;
+  if (!uid) return;
+  await setDoc(doc(db, "users", uid, "meta", "preferences"), { autoplayNext: value }, { merge: true });
 }

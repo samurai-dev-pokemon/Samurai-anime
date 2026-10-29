@@ -3,14 +3,27 @@ import { Link, useParams, useSearchParams } from "react-router-dom";
 import Comments from "../components/Comments";
 import { cn } from "../utils/cn";
 import { href } from "../utils/router";
-import { findBestStream, formatStatus, getAiredEpisodeCount, getAnimeByMalId, getEpisodeCount, getSkipTimes, resolveWatch, titleOf } from "../lib/api";
+import { tryEmbedUrl } from "../lib/tryembed";
+import {
+  findBestStream,
+  formatStatus,
+  getAiredEpisodeCount,
+  getAnilistId,
+  getAnimeByMalId,
+  getEpisodeCount,
+  getSkipTimes,
+  resolveWatch,
+  titleOf,
+} from "../lib/api";
 import {
   markEpisodeWatched,
   removeFromWatchlist,
   removeProgress,
   saveProgress,
   setDubFallbackEnabled,
+  useAutoplayNext,
   useDubFallbackEnabled,
+  usePreferredAudio,
   useProgress,
   useProgressLoaded,
   useWatchedEpisodes,
@@ -21,16 +34,18 @@ import VideoPlayer from "../components/VideoPlayer";
 
 const CHUNK_SIZE = 100;
 
-function megaplayEmbedUrl(malId: number, ep: number, audio: "sub" | "dub"): string {
-  return `https://megaplay.buzz/stream/mal/${malId}/${ep}/${audio}`;
-}
-
 export default function Watch() {
   const { malId = "" } = useParams();
   const id = Number(malId);
   const [params, setParams] = useSearchParams();
   const ep = Math.max(1, Number(params.get("ep")) || 1);
-  const audio = (params.get("audio") === "dub" ? "dub" : "sub") as "sub" | "dub";
+
+  const preferredAudio = usePreferredAudio();
+  const audioParam = params.get("audio");
+  const audio = (audioParam === "dub" || audioParam === "sub" ? audioParam : preferredAudio) as "sub" | "dub";
+
+  const autoplayNext = useAutoplayNext();
+
   const [server, setServer] = useState<string | undefined>(undefined);
   const [useEmbed, setUseEmbed] = useState(false);
   const [rangeIndex, setRangeIndex] = useState(0);
@@ -69,6 +84,14 @@ export default function Watch() {
     if (!id || !ep) return null;
     return getSkipTimes(id, ep);
   }, [id, ep]);
+
+  // Resolve the AniList ID for this MAL id, used for the TryEmbed fallback
+  // player. Cached in lib/api.ts so this only hits the network once per
+  // anime per session.
+  const { data: anilistId, loading: anilistLoading } = useAsync(
+    () => (id ? getAnilistId(id) : Promise.resolve(null)),
+    [id],
+  );
 
   async function useServer(name: string) {
     setServer(name);
@@ -110,7 +133,7 @@ export default function Watch() {
         cover: anime.poster || anime.cover || "",
         episode: ep,
         audio,
-        provider: useEmbed ? "megaplay" : playableStream?.server || "anivault",
+        provider: useEmbed ? "tryembed" : playableStream?.server || "anivault",
         time,
         duration,
         updatedAt: now,
@@ -132,38 +155,34 @@ export default function Watch() {
     if (isLastEpisode) {
       await removeFromWatchlist(id);
       await removeProgress(id);
-    } else {
+    } else if (autoplayNext) {
       goEp(ep + 1);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [anime, id, ep, totalEpisodes]);
+  }, [anime, id, ep, totalEpisodes, autoplayNext]);
 
+  // TryEmbed posts a `PLAYER_EVENT` message roughly every 100ms with the
+  // current playback state. There's no explicit "ended" event, so we infer
+  // completion when it's paused within ~1.5s of the total duration.
   useEffect(() => {
     if (!useEmbed) return;
+    let endedFired = false;
+
     function onMessage(event: MessageEvent) {
-      let data: any = event.data;
-      if (typeof data === "string") {
-        try {
-          data = JSON.parse(data);
-        } catch {
-          return;
-        }
-      }
-      if (!data || typeof data !== "object") return;
+      const data = event.data;
+      if (!data || typeof data !== "object" || data.type !== "PLAYER_EVENT") return;
 
-      if (data.type === "complete") {
+      const { currentTime, duration, paused } = data.data || {};
+      if (typeof currentTime !== "number" || typeof duration !== "number" || duration <= 0) return;
+
+      onProgress(currentTime, duration);
+
+      if (!endedFired && paused && duration - currentTime < 1.5) {
+        endedFired = true;
         onEnded();
-        return;
-      }
-
-      if (data.type === "watching-log" || data.channel === "megacloud") {
-        const current = data.currentTime ?? data.time ?? data.position;
-        const dur = data.duration ?? data.total;
-        if (typeof current === "number" && typeof dur === "number" && dur > 0) {
-          onProgress(current, dur);
-        }
       }
     }
+
     window.addEventListener("message", onMessage);
     return () => window.removeEventListener("message", onMessage);
   }, [useEmbed, onEnded, onProgress]);
@@ -174,7 +193,16 @@ export default function Watch() {
   const visibleEpisodes = fullEpisodeList.slice(chunkStart, chunkStart + CHUNK_SIZE);
 
   const playerLoading = streamLoading || !progressLoaded;
-  const embedUrl = megaplayEmbedUrl(id, ep, audio);
+
+  const embedUrl = anilistId
+    ? tryEmbedUrl(anilistId, ep, audio, {
+        autoSkip: true,
+        autoNext: autoplayNext,
+        hideLangSelector: true,
+        startAt: initial?.time,
+        skin: "cinema",
+      })
+    : null;
 
   return (
     <div className="min-h-screen pb-20 pt-20">
@@ -205,28 +233,43 @@ export default function Watch() {
                   onClick={() => setUseEmbed(true)}
                   className={cn("inline-flex items-center gap-1.5 rounded-full px-3 py-1.5 transition", useEmbed ? "bg-red-600 text-white" : "text-zinc-400 hover:text-white")}
                 >
-                  <Icon.Globe className="h-3.5 w-3.5" /> Megaplay (embed)
+                  <Icon.Globe className="h-3.5 w-3.5" /> Embed Player
                 </button>
               </div>
               {useEmbed && (
-                <span className="text-[11px] text-amber-400">Third-party embed — may include ads. Progress still saves to your account.</span>
+                <span className="text-[11px] text-amber-400">Third-party embed — progress still saves to your account.</span>
               )}
             </div>
 
             {useEmbed ? (
-              <div className="relative aspect-video w-full overflow-hidden rounded-xl bg-black ring-1 ring-white/10">
-                <iframe
-                  key={`megaplay-${id}-${ep}-${audio}`}
-                  src={embedUrl}
-                  allowFullScreen
-                  className="h-full w-full"
-                  title="Megaplay embed"
-                  referrerPolicy="no-referrer"
-                />
-                <div className="absolute left-3 top-3 rounded-md bg-black/70 px-2.5 py-1 text-[11px] text-amber-300 backdrop-blur">
-                  Embedded server — some ads may appear
+              anilistLoading ? (
+                <Skeleton className="aspect-video w-full" />
+              ) : !anilistId ? (
+                <div className="flex aspect-video w-full flex-col items-center justify-center gap-3 rounded-xl border border-white/10 bg-zinc-950 p-6 text-center">
+                  <Icon.Info className="h-8 w-8 text-amber-400" />
+                  <p className="text-sm font-medium text-zinc-200">Embed unavailable for this title.</p>
+                  <p className="max-w-sm text-xs text-zinc-500">
+                    This anime isn't mapped on AniList, so the embedded player can't load. Try the AniVault player instead.
+                  </p>
+                  <button
+                    onClick={() => setUseEmbed(false)}
+                    className="rounded-full bg-red-600 px-4 py-1.5 text-xs font-semibold text-white transition hover:bg-red-500"
+                  >
+                    Switch to AniVault Player
+                  </button>
                 </div>
-              </div>
+              ) : (
+                <div className="relative aspect-video w-full overflow-hidden rounded-xl bg-black ring-1 ring-white/10">
+                  <iframe
+                    key={`tryembed-${anilistId}-${ep}-${audio}`}
+                    src={embedUrl!}
+                    allowFullScreen
+                    className="h-full w-full"
+                    title="Embed player"
+                    referrerPolicy="no-referrer"
+                  />
+                </div>
+              )
             ) : playerLoading ? (
               <Skeleton className="aspect-video w-full" />
             ) : error ? (
