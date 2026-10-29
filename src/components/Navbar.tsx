@@ -57,10 +57,6 @@ export default function Navbar() {
     mobileSearchRef.current?.focus();
   }, [searchOpen]);
 
-  // Check for newly released/new-episode subscriptions on mount, then
-  // every 10 minutes while the tab stays open. This is a foreground-only
-  // check — see src/lib/notifications.ts for why true background push
-  // isn't possible without a backend.
   useEffect(() => {
     checkForNewEpisodes();
     const interval = setInterval(() => checkForNewEpisodes(), 10 * 60 * 1000);
@@ -84,6 +80,19 @@ export default function Navbar() {
     return () => document.removeEventListener("pointerdown", onPointerDown);
   }, [searchOpen, menuOpen, notifOpen]);
 
+  // Close the mobile sheet automatically if the viewport grows past the
+  // tablet breakpoint (e.g. rotating an iPad from portrait to landscape
+  // past xl, or resizing a browser window) so it doesn't stay stuck open.
+  useEffect(() => {
+    function onResize() {
+      if (window.innerWidth >= 1280) {
+        setMobileOpen(false);
+      }
+    }
+    window.addEventListener("resize", onResize);
+    return () => window.removeEventListener("resize", onResize);
+  }, []);
+
   function toggleMobileMenu() {
     setSearchOpen(false);
     setMobileOpen((v) => !v);
@@ -106,10 +115,15 @@ export default function Navbar() {
 
   return (
     <>
-      <header className={cn("fixed inset-x-0 top-0 z-50 transition-colors duration-300", scrolled || mobileOpen ? "bg-zinc-950/95 shadow-lg shadow-black/40 backdrop-blur" : "bg-gradient-to-b from-black/80 via-black/40 to-transparent")}>
-        <div className="mx-auto flex h-16 w-full max-w-[1700px] items-center gap-2 px-4 sm:gap-4 sm:px-8 lg:px-12">
+      <header
+        className={cn(
+          "fixed inset-x-0 top-0 z-50 pt-[env(safe-area-inset-top)] transition-colors duration-300",
+          scrolled || mobileOpen ? "bg-zinc-950/95 shadow-lg shadow-black/40 backdrop-blur" : "bg-gradient-to-b from-black/80 via-black/40 to-transparent",
+        )}
+      >
+        <div className="mx-auto flex h-16 w-full max-w-[1700px] items-center gap-2 px-4 sm:gap-3 sm:px-6 lg:px-8 xl:px-12">
           {searchOpen && (
-            <form onSubmit={submitSearch} className="flex w-full items-center gap-2 sm:hidden">
+            <form onSubmit={submitSearch} className="flex w-full items-center gap-2 xl:hidden">
               <button
                 type="button"
                 onClick={() => {
@@ -134,8 +148,8 @@ export default function Navbar() {
             </form>
           )}
 
-          <div className={cn("flex w-full items-center gap-2 sm:gap-4", searchOpen && "hidden sm:flex")}>
-            <button className="grid h-10 w-10 shrink-0 place-items-center rounded-md text-zinc-300 lg:hidden" onClick={toggleMobileMenu} aria-label="Menu">
+          <div className={cn("flex w-full items-center gap-2 sm:gap-3", searchOpen && "hidden xl:flex")}>
+            <button className="grid h-10 w-10 shrink-0 place-items-center rounded-md text-zinc-300 xl:hidden" onClick={toggleMobileMenu} aria-label="Menu">
               <Icon.Menu className="h-5 w-5" />
             </button>
 
@@ -143,7 +157,7 @@ export default function Navbar() {
               <Logo shortOnMobile />
             </div>
 
-            <nav className="ml-4 hidden items-center gap-6 text-sm font-medium text-zinc-300 lg:flex">
+            <nav className="ml-4 hidden items-center gap-5 text-sm font-medium text-zinc-300 xl:flex">
               {NAV_LINKS.map((l) => (
                 <Link key={l.label} to={l.to} className="whitespace-nowrap transition hover:text-white">
                   {l.label}
@@ -151,15 +165,18 @@ export default function Navbar() {
               ))}
             </nav>
 
-            <div className="ml-auto flex items-center gap-2 sm:gap-3">
-              <button type="button" onClick={() => setSearchOpen(true)} className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-zinc-300 hover:text-white sm:hidden" aria-label="Search">
+            <div className="ml-auto flex items-center gap-1.5 sm:gap-2 xl:gap-3">
+              <button type="button" onClick={() => setSearchOpen(true)} className="grid h-10 w-10 shrink-0 place-items-center rounded-full text-zinc-300 hover:text-white xl:hidden" aria-label="Search">
                 <Icon.Search className="h-[18px] w-[18px]" />
               </button>
 
               <form
                 ref={desktopSearchWrapRef}
                 onSubmit={submitSearch}
-                className={cn("hidden items-center overflow-hidden rounded-full border border-white/10 bg-black/50 transition-all sm:flex", searchOpen ? "w-64 px-3" : "w-9 justify-center")}
+                className={cn(
+                  "hidden items-center overflow-hidden rounded-full border border-white/10 bg-black/50 transition-all xl:flex",
+                  searchOpen ? "w-56 px-3 2xl:w-64" : "w-9 justify-center",
+                )}
               >
                 <button type="button" onClick={() => setSearchOpen((v) => !v)} className="grid h-9 w-9 shrink-0 place-items-center text-zinc-300 hover:text-white" aria-label="Search">
                   <Icon.Search className="h-4 w-4" />
@@ -175,14 +192,8 @@ export default function Navbar() {
                 )}
               </form>
 
-              {/* Notifications bell — now functional. Shows an unread-count
-                  badge and a dropdown of recent release/episode alerts. */}
               <div className="relative" ref={notifWrapRef}>
-                <button
-                  onClick={openNotifications}
-                  className="relative grid h-9 w-9 place-items-center rounded-full text-zinc-300 hover:text-white sm:h-9 sm:w-9"
-                  aria-label="Notifications"
-                >
+                <button onClick={openNotifications} className="relative grid h-9 w-9 place-items-center rounded-full text-zinc-300 hover:text-white" aria-label="Notifications">
                   <Icon.Bell className="h-[18px] w-[18px]" />
                   {unreadCount > 0 && (
                     <span className="absolute right-1 top-1 grid h-4 w-4 place-items-center rounded-full bg-red-600 text-[9px] font-bold text-white">
@@ -246,7 +257,7 @@ export default function Navbar() {
                     <span className="grid h-7 w-7 shrink-0 place-items-center overflow-hidden rounded-full bg-red-600 text-xs font-bold uppercase text-white">
                       {user.photoURL ? <img src={user.photoURL} alt={user.name} className="h-full w-full object-cover" /> : user.name.slice(0, 1)}
                     </span>
-                    <span className="hidden max-w-[90px] truncate sm:inline">{user.name}</span>
+                    <span className="hidden max-w-[90px] truncate xl:inline">{user.name}</span>
                   </button>
                   {menuOpen && (
                     <div className="absolute right-0 top-11 w-48 overflow-hidden rounded-xl border border-white/10 bg-zinc-950 py-1 shadow-xl">
@@ -270,7 +281,7 @@ export default function Navbar() {
                 </div>
               ) : (
                 <div className="flex items-center gap-2">
-                  <button onClick={() => setAuthMode("signin")} className="hidden rounded-full px-4 py-1.5 text-sm font-semibold text-zinc-200 transition hover:text-white sm:block">
+                  <button onClick={() => setAuthMode("signin")} className="hidden rounded-full px-3 py-1.5 text-sm font-semibold text-zinc-200 transition hover:text-white lg:block">
                     Sign In
                   </button>
                   <button onClick={() => setAuthMode("signup")} className="whitespace-nowrap rounded-full bg-red-600 px-3 py-1.5 text-sm font-semibold text-white shadow shadow-red-900/40 transition hover:bg-red-500 sm:px-4">
@@ -283,7 +294,7 @@ export default function Navbar() {
         </div>
 
         {mobileOpen && (
-          <nav className="flex flex-col gap-1 border-t border-white/10 px-4 py-3 text-sm font-medium text-zinc-300 lg:hidden">
+          <nav className="flex max-h-[calc(100dvh-4rem)] flex-col gap-1 overflow-y-auto border-t border-white/10 px-4 py-3 text-sm font-medium text-zinc-300 xl:hidden">
             {NAV_LINKS.map((l) => (
               <Link key={l.label} to={l.to} className="rounded-lg px-3 py-2.5 hover:bg-white/5 hover:text-white" onClick={() => setMobileOpen(false)}>
                 {l.label}

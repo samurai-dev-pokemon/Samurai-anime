@@ -23,6 +23,8 @@ import { useAsync } from "../lib/useAsync";
 import type { Anime } from "../lib/types";
 import { AnimeCard, Badge, CardRow, CardSkeletons, Container, ErrorNote, Icon, RowItem, Section, Skeleton } from "../components/ui";
 
+const HERO_HEIGHT = "h-[62dvh] min-h-[460px] w-full sm:h-[68dvh] sm:min-h-[480px] lg:h-[78dvh] lg:min-h-[520px]";
+
 /* ---------------- Hero ---------------- */
 function Hero({ items }: { items: Anime[] }) {
   const [i, setI] = useState(0);
@@ -39,7 +41,7 @@ function Hero({ items }: { items: Anime[] }) {
 
   return (
     <div
-      className="relative h-[58vh] min-h-[420px] w-full overflow-hidden sm:h-[68vh] sm:min-h-[480px] lg:h-[78vh] lg:min-h-[520px]"
+      className={cn("relative overflow-hidden bg-zinc-950", HERO_HEIGHT)}
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
     >
@@ -55,8 +57,11 @@ function Hero({ items }: { items: Anime[] }) {
       <div className="absolute inset-0 bg-gradient-to-r from-zinc-950 via-zinc-950/60 to-zinc-950/10" />
       <div className="absolute inset-0 bg-gradient-to-t from-zinc-950 via-transparent to-zinc-950/50" />
 
-      <Container className="relative flex h-full flex-col justify-start pb-8 pt-20 sm:justify-end sm:pb-12 sm:pt-0 lg:pb-16">
-        <div className="max-w-2xl space-y-3 sm:space-y-4">
+      {/* Content is always bottom-anchored now (mobile used to top-align
+          with a large pt-20, which read as a dead gap under the navbar
+          on phones). Padding scales down on small screens instead. */}
+      <Container className="relative flex h-full flex-col justify-end pb-6 pt-20 sm:pb-12 lg:pb-16">
+        <div className="max-w-2xl space-y-2.5 sm:space-y-4">
           <div className="flex flex-wrap items-center gap-2">
             <Badge className="border-red-500/40 bg-red-500/10 text-red-300">Featured</Badge>
             {a.score ? (
@@ -68,7 +73,7 @@ function Hero({ items }: { items: Anime[] }) {
             {a.year && <Badge>{a.year}</Badge>}
             {a.episodes && <Badge>{a.episodes} episodes</Badge>}
           </div>
-          <h1 className="text-3xl font-bold leading-[1.05] tracking-tight text-white drop-shadow sm:text-5xl lg:text-6xl">{titleOf(a)}</h1>
+          <h1 className="text-2xl font-bold leading-[1.05] tracking-tight text-white drop-shadow sm:text-5xl lg:text-6xl">{titleOf(a)}</h1>
           <p className="line-clamp-2 max-w-xl text-sm leading-relaxed text-zinc-300 sm:line-clamp-3 sm:text-base">{cleanDesc(a.synopsis)}</p>
           <div className="hidden flex-wrap gap-2 pt-1 sm:flex">
             {a.genres?.slice(0, 4).map((g) => (
@@ -76,16 +81,16 @@ function Hero({ items }: { items: Anime[] }) {
             ))}
           </div>
           <div className="flex items-center gap-3 pt-1 sm:pt-2">
-            <Link to={href.watch(a.malId, 1)} className="inline-flex h-11 items-center gap-2 rounded-full bg-red-600 px-5 text-sm font-semibold text-white shadow-lg shadow-red-900/40 transition hover:bg-red-500 active:scale-[0.98] sm:px-6">
+            <Link to={href.watch(a.malId, 1)} className="inline-flex h-10 items-center gap-2 rounded-full bg-red-600 px-4 text-sm font-semibold text-white shadow-lg shadow-red-900/40 transition hover:bg-red-500 active:scale-[0.98] sm:h-11 sm:px-6">
               <Icon.Play className="h-4 w-4" /> Watch now
             </Link>
-            <Link to={href.anime(a.malId)} className="inline-flex h-11 items-center rounded-full border border-white/15 bg-white/5 px-5 text-sm font-medium text-zinc-100 backdrop-blur transition hover:bg-white/10 sm:px-6">
+            <Link to={href.anime(a.malId)} className="inline-flex h-10 items-center rounded-full border border-white/15 bg-white/5 px-4 text-sm font-medium text-zinc-100 backdrop-blur transition hover:bg-white/10 sm:h-11 sm:px-6">
               Details
             </Link>
           </div>
         </div>
 
-        <div className="mt-5 flex items-center gap-2 sm:mt-10">
+        <div className="mt-4 flex items-center gap-2 sm:mt-10">
           {items.map((it, idx) => (
             <button key={it.malId} onClick={() => setI(idx)} aria-label={titleOf(it)} className={cn("h-1 rounded-full transition-all", idx === i ? "w-8 bg-red-500" : "w-4 bg-white/25 hover:bg-white/50")} />
           ))}
@@ -225,7 +230,7 @@ export default function Home() {
   return (
     <div className="pb-20">
       {featured.loading ? (
-        <div className="h-[58vh] min-h-[420px] w-full sm:h-[68vh] sm:min-h-[480px] lg:h-[78vh] lg:min-h-[520px]">
+        <div className={HERO_HEIGHT}>
           <Skeleton className="h-full w-full rounded-none" />
         </div>
       ) : featured.error ? (
